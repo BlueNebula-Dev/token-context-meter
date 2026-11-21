@@ -8,6 +8,29 @@
   const conversationId = urlParams.get('conversationId') || '';
   const token = urlParams.get('token') || '';
 
+  // Theme sync: follow the Antigravity host background (dark by default)
+  function syncScheme() {
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;color:var(--background, #131417)';
+    document.documentElement.appendChild(probe);
+    const c = getComputedStyle(probe).color;
+    probe.remove();
+    const nums = (c.match(/[\d.]+/g) || []).map(Number);
+    if (nums.length < 3) return;
+    const scale = c.startsWith('color(') ? 1 : 255;
+    const [r, g, b] = nums.slice(0, 3).map((v) => v / scale);
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const theme = lum < 0.5 ? 'dark' : 'light';
+    if (document.documentElement.dataset.theme !== theme) {
+      document.documentElement.dataset.theme = theme;
+    }
+  }
+  syncScheme();
+  new MutationObserver(syncScheme).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['style'],
+  });
+
   let currentTelemetry = null;
   let pollInterval = null;
   let activeView = localStorage.getItem('token_meter_view') || 'prompt';
@@ -117,15 +140,13 @@
       renderDashboard(data);
 
       if (statusDot) {
-        statusDot.style.background = '#34d399';
-        statusDot.style.boxShadow = '0 0 6px rgba(52, 211, 153, 0.6)';
+        statusDot.style.background = 'var(--tm-ok)';
       }
       if (statusText) statusText.textContent = '2.5s live';
     } catch (err) {
       console.warn('Telemetry sync error:', err.message);
       if (statusDot) {
-        statusDot.style.background = '#f87171';
-        statusDot.style.boxShadow = '0 0 6px rgba(248, 113, 113, 0.6)';
+        statusDot.style.background = 'var(--tm-crit)';
       }
       if (statusText) statusText.textContent = 'Reconnecting';
     }
@@ -164,14 +185,14 @@
     const pct = Math.min(100, Math.max(0, ctx.consumptionPct || 0));
     contextPctValue.textContent = `${pct.toFixed(1)}%`;
 
-    let color = '#34d399'; // Emerald (< 50%)
+    let color = 'var(--tm-ok)'; // Green (< 50%)
     let healthLabel = 'Optimal Status';
 
     if (pct >= 80) {
-      color = '#f87171'; // Red (> 80%)
+      color = 'var(--tm-crit)'; // Red (> 80%)
       healthLabel = 'Critical Status (>80%)';
     } else if (pct >= 50) {
-      color = '#fbbf24'; // Amber (50% - 80%)
+      color = 'var(--tm-warn)'; // Amber (50% - 80%)
       healthLabel = 'Moderate Status (50-80%)';
     }
 
