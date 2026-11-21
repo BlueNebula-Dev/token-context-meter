@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Token & Context Meter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="meter-container">
+    <!-- Editorial Top Bar -->
+    <header class="header">
+      <div class="header-left">
+        <div class="header-title">Context Meter</div>
+        <div class="header-sub font-mono" id="cascadeIdBadge" title="Active conversation ID">Cascade · ...</div>
+      </div>
+      <div class="header-actions">
+        <span class="live-status font-mono">
+          <span class="status-dot-pulse" id="statusDot"></span>
+          <span id="statusText">2.5s live</span>
+        </span>
+        <button class="pill-btn" id="copyMarkdownBtn" title="Copy /context prompt summary">
+          /context
+        </button>
+        <button class="icon-btn" id="refreshBtn" title="Refresh Telemetry">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Scrollable Ledger -->
+    <main class="main-content custom-scrollbar">
+
+      <!-- Hero Capacity Headline (Cardless) -->
+      <section class="section-block">
+        <div class="hero-top-row font-mono">
+          <span class="section-label">WINDOW UTILIZATION</span>
+          <span class="health-status-text" id="healthBadge">Optimal Status</span>
+        </div>
+
+        <div class="hero-metric-row font-mono">
+          <span class="hero-percent" id="contextPctValue">0.0%</span>
+          <span class="hero-sublabel">used capacity</span>
+        </div>
+
+        <div class="bar-track">
+          <div class="bar-fill" id="contextProgressBar" style="width: 0%"></div>
+        </div>
+
+        <div class="hero-tokens-row font-mono">
+          <span id="activeTokensVal">0 active</span>
+          <span id="remainingTokensVal">0 remaining</span>
+        </div>
+
+        <div class="badges-row font-mono">
+          <span class="badge model-badge" id="modelNameBadge">Gemini 3.8 Flash</span>
+          <span class="badge multi-model-badge" id="multiModelBadge" style="display: none;">2 Models</span>
+        </div>
+      </section>
+
+      <!-- Compaction Alert (Cardless) -->
+      <div class="compaction-alert" id="compactionAlert" style="display: none;">
+        <div class="compaction-title font-mono" id="compactionTitle">Context Compaction Active</div>
+        <div class="compaction-desc" id="compactionDesc">History checkpoints summarized earlier turns.</div>
+      </div>
+
+      <div class="hairline-divider"></div>
+
+      <!-- Active Turn Breakdown (Editorial Key-Value) -->
+      <section class="section-block">
+        <div class="section-header-row">
+          <span class="section-label">Active Turn</span>
+          <span class="cache-rate font-mono" id="cacheHitBadge">0.0% Cached</span>
+        </div>
+
+        <div class="ledger-list font-mono">
+          <div class="ledger-row primary-row">
+            <span class="ledger-key">Total Prompt Tokens</span>
+            <span class="ledger-val bold-white" id="turnPromptTotalVal">0</span>
+          </div>
+          <div class="ledger-row indent-row">
+            <span class="ledger-key-sub">Cache Read</span>
+            <span class="ledger-val cache-green" id="turnCacheReadVal">0</span>
+          </div>
+          <div class="ledger-row indent-row">
+            <span class="ledger-key-sub">New Input</span>
+            <span class="ledger-val neutral-val" id="turnNewInputVal">0</span>
+          </div>
+
+          <div class="ledger-row primary-row pt-separator">
+            <span class="ledger-key">Generation Output</span>
+            <span class="ledger-val bold-purple" id="turnOutputTotalBadge">0</span>
+          </div>
+          <div class="ledger-row indent-row">
+            <span class="ledger-key-sub">Thinking</span>
+            <span class="ledger-val thinking-purple" id="turnThinkingVal">0</span>
+          </div>
+          <div class="ledger-row indent-row">
+            <span class="ledger-key-sub">Response & Tools</span>
+            <span class="ledger-val neutral-val" id="turnResponseVal">0</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="hairline-divider"></div>
+
+      <!-- Cumulative Session Statistics -->
+      <section class="section-block">
+        <div class="section-header-row">
+          <span class="section-label">Session Totals</span>
+          <span class="turn-count font-mono" id="totalTurnsBadge">0 Turns</span>
+        </div>
+
+        <div class="session-metric-row font-mono">
+          <div class="session-total-num" id="sessionProcessedVal">0</div>
+          <div class="session-reuse-rate" id="sessionCacheSavingsVal">0.0% Re-use Rate</div>
+        </div>
+
+        <div class="session-summary-row font-mono">
+          <span>In: <strong id="sessionInputTotal" class="summary-strong">0</strong></span>
+          <span>Out: <strong id="sessionOutputTotal" class="summary-strong">0</strong></span>
+          <span>Think: <strong id="sessionThinkingTotal" class="summary-strong">0</strong></span>
+        </div>
+      </section>
+
+      <div class="hairline-divider"></div>
+
+      <!-- Log Section (Editorial List) -->
+      <section class="section-block pb-6">
+        <div class="section-header-row">
+          <span class="section-label">Telemetry</span>
+          <div class="view-toggle font-mono">
+            <button class="toggle-btn active" id="viewPromptBtn" data-view="prompt" title="Group telemetry by user prompt">By Prompt</button>
+            <button class="toggle-btn" id="viewStepBtn" data-view="step" title="Detailed per-step LLM calls">By Step</button>
+          </div>
+        </div>
+
+        <div class="telemetry-list font-mono" id="telemetryList">
+          <div class="empty-state font-mono">Loading telemetry records...</div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="/preload.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

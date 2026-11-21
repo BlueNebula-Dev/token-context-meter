@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "token-context-meter": {
+      "command": "node",
+      "args": ["C:/Users/Gian/.gemini/config/plugins/token-context-meter/mcp/server.mjs"]
+    }
+  }
+}

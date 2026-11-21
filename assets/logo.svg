@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="meterGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="50%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1e24" />
+      <stop offset="100%" stop-color="#0f1115" />
+    </linearGradient>
+  </defs>
+  <!-- Background Container -->
+  <rect width="100" height="100" rx="22" fill="url(#bgGrad)" stroke="#333" stroke-width="1.5" />
+  
+  <!-- Gauge Arc Background -->
+  <path d="M 22 72 A 38 38 0 1 1 78 72" fill="none" stroke="#2a2e39" stroke-width="8" stroke-linecap="round" />
+  
+  <!-- Gauge Active Arc -->
+  <path d="M 22 72 A 38 38 0 1 1 68 34" fill="none" stroke="url(#meterGrad)" stroke-width="8" stroke-linecap="round" />
+  
+  <!-- Center Needle Pivot -->
+  <circle cx="50" cy="55" r="5" fill="#8b5cf6" />
+  <circle cx="50" cy="55" r="2.5" fill="#fff" />
+  
+  <!-- Needle -->
+  <line x1="50" y1="55" x2="65" y2="38" stroke="#f8fafc" stroke-width="3" stroke-linecap="round" />
+  
+  <!-- Token chips at bottom -->
+  <rect x="32" y="72" width="36" height="12" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1" />
+  <text x="50" y="81" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="7" font-weight="700" fill="#38bdf8" text-anchor="middle">TOKENS</text>
+</svg>
