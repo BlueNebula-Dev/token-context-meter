@@ -264,7 +264,7 @@
       let routingHtml = '';
       if (p.modelsUsedShort && p.modelsUsedShort.length > 0) {
         routingHtml = p.modelsUsedShort.map(m =>
-          `<span class="routing-pill ${getModelPillClass(m)}" title="${m}">${m}</span>`
+          `<span class="routing-pill ${getModelPillClass(m)}" title="${escapeHtml(m)}">${escapeHtml(m)}</span>`
         ).join('<span class="routing-arrow">→</span>');
       }
 
@@ -305,8 +305,8 @@
           <div class="item-top-row">
             <div class="item-title">
               <span class="step-turn">#${t.turnNumber}</span>
-              <span class="step-indices">· Step ${stepsStr}</span>
-              <span class="routing-pill ${getModelPillClass(modelLabel)}" title="${modelFullName}">${modelLabel}</span>
+              <span class="step-indices">· Step ${escapeHtml(stepsStr)}</span>
+              <span class="routing-pill ${getModelPillClass(modelLabel)}" title="${escapeHtml(modelFullName)}">${escapeHtml(modelLabel)}</span>
             </div>
             <span class="item-cache-badge ${cacheClass}">${t.cacheEfficiencyPct}% cache</span>
           </div>
