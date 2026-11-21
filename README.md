@@ -43,14 +43,15 @@ Token & Context Meter eliminates guesswork by querying Antigravity Desktop's run
 
 ---
 
-## User Interface: Cardless Editorial Ledger
+## User Interface
 
-The sidecar user interface follows a cardless editorial ledger layout designed for clarity and information density in desktop side panels:
+The sidecar user interface matches the aesthetic of the Antigravity `context` panel:
 
-- **Obsidian Theme**: Minimalist dark background (`#0e0f12`) with hairline dividers (`#1a1d24`) instead of heavy card containers.
-- **Tabular Figures**: Set in Plus Jakarta Sans and JetBrains Mono with tabular numbers (`tabular-nums`) to prevent layout shift during live updates.
-- **Window Utilization Header**: Large percentage headline with a 4px dynamic capacity bar (optimal, moderate, critical thresholds) and active/remaining token figures.
-- **Active Turn Key-Value Ledger**: Clear hierarchical breakdown of prompt inputs and generation outputs.
+- **Host Theme Tokens**: Inherits Antigravity's theme variables (`--background`, `--foreground`, `--border`, etc.), defaulting to a near-black surface (`#131417`) and automatically switching to a light palette when the host theme is light.
+- **Typography**: Google Sans Flex with tabular figures (`tabular-nums`) to prevent layout shift during live updates.
+- **Window Utilization Header**: Compact `X% used` headline with an 8px rounded capacity bar (optimal, moderate, critical thresholds) and active/remaining token figures.
+- **Active Turn Ledger**: Hierarchical breakdown of prompt inputs and generation outputs with colored category swatches (cache, input, thinking, output).
+- **Pills & Segmented Controls**: Soft tinted pills for cache %, model routing, and multi-model badges; segmented `By Prompt | By Step` toggle; subtle row hover states.
 - **Session Totals**: High-level processed volume and cumulative cache reuse rates.
 - **Telemetry Section with Dual Views**:
   - **By Prompt**: Aggregates internal tool loops and model calls between user message boundaries. Shows sequential prompt numbers, preview text, internal call count, model routing chain, token sums, and ending context window consumption.
@@ -75,8 +76,8 @@ token-context-meter/
 ├── sidecars/
 │   └── meter/
 │       ├── sidecar.json        # Sidecar auxiliary pane configuration
-│       ├── index.html          # Editorial ledger dashboard
-│       ├── styles.css          # Cardless styling and typography
+│       ├── index.html          # Context meter dashboard
+│       ├── styles.css          # Host-themed styling and typography
 │       ├── app.js              # Real-time dashboard controller
 │       ├── server.js           # Sidecar bootstrap loader
 │       ├── main.mjs            # Sidecar SDK and HTTP fallback router
