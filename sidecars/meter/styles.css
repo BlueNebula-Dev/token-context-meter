@@ -625,7 +625,94 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--cx-fg-muted);
 }
 
-/* ---------- Global Tab & Snapshots ---------- */
+/* ---------- Global Tab, Quotas & Snapshots ---------- */
+.account-badge {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quota-pools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.quota-pool-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--cx-border);
+}
+.quota-pool-item:last-child { border-bottom: none; }
+.quota-pool-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.quota-pool-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.quota-pool-label {
+  font-weight: 500;
+  color: var(--cx-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quota-win-pill {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--cx-fill);
+  color: var(--cx-fg-muted);
+}
+.quota-win-pill.weekly {
+  color: var(--tm-pro);
+  background: color-mix(in srgb, var(--tm-pro) 14%, transparent);
+}
+.quota-pool-bar {
+  width: 100%;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--cx-track);
+  overflow: hidden;
+}
+.quota-pool-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 300ms var(--ease-out);
+}
+.quota-pool-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--cx-fg-muted);
+}
+.auto-pill {
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--cx-primary);
+  background: color-mix(in srgb, var(--cx-primary) 16%, transparent);
+  margin-right: 4px;
+}
+.snapshot-models {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--cx-border);
+}
 .global-controls {
   display: flex;
   flex-direction: column;

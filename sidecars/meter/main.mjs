@@ -131,7 +131,7 @@ if (SidecarApp && hasSidecarEnv) {
 
   app.api('/api/global/snapshot/delete', async (data) => {
     try {
-      return deleteGlobalSnapshot(data?.id || '');
+      return await deleteGlobalSnapshot(data?.id || '');
     } catch (err) {
       return { error: err.message };
     }
@@ -245,7 +245,7 @@ if (SidecarApp && hasSidecarEnv) {
     if (url.pathname === '/api/global/snapshot/delete' && req.method === 'POST') {
       try {
         const body = await readJsonBody(req);
-        const data = deleteGlobalSnapshot(body?.id || '');
+        const data = await deleteGlobalSnapshot(body?.id || '');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(data));
       } catch (err) {

@@ -276,6 +276,17 @@
 
       <!-- ============ GLOBAL TAB ============ -->
       <div id="tabGlobal" class="tab-pane hidden">
+        <!-- Logged-in Account & Live 5h / Weekly Quota Pools -->
+        <section class="section-block">
+          <div class="section-header-row">
+            <span class="section-label">Account &amp; Quotas</span>
+            <span class="badge account-badge font-mono" id="globalAccountBadge">Loading account…</span>
+          </div>
+          <div id="quotaPoolsList" class="quota-pools-list font-mono">
+            <div class="empty-state">Loading 5h &amp; weekly quotas…</div>
+          </div>
+        </section>
+
         <section class="section-block">
           <div class="section-header-row">
             <span class="section-label">Global Usage</span>

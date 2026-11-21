@@ -169,6 +169,8 @@
   const agentsList = document.getElementById('agentsList');
 
   // DOM Elements - Global Tab
+  const globalAccountBadge = document.getElementById('globalAccountBadge');
+  const quotaPoolsList = document.getElementById('quotaPoolsList');
   const globalTotalVal = document.getElementById('globalTotalVal');
   const globalMetaVal = document.getElementById('globalMetaVal');
   const globalCacheVal = document.getElementById('globalCacheVal');
@@ -564,9 +566,60 @@
     }).join('');
   }
 
+  function formatCountdown(ms) {
+    const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+    const days = Math.floor(totalSec / 86400);
+    const hrs = Math.floor((totalSec % 86400) / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    if (days > 0) return `${days}d ${hrs}h`;
+    if (hrs > 0) return `${hrs}h ${mins}m`;
+    return `${mins}m`;
+  }
+
   // ---------- Global Usage Rendering ----------
   function renderGlobalView(data) {
     if (!data) return;
+
+    // Logged-in account badge
+    if (globalAccountBadge && data.account) {
+      const acct = data.account;
+      globalAccountBadge.textContent = `${acct.email}${acct.planName ? ` · ${acct.planName}` : ''}`;
+      globalAccountBadge.title = `Separated storage for ${acct.name} (${acct.email})`;
+    }
+
+    // 5-Hour & Weekly Quota Pools
+    if (quotaPoolsList) {
+      const pools = data.quotaPools || [];
+      if (!pools.length) {
+        quotaPoolsList.innerHTML = `<div class="empty-state">No quota pool data reported by Antigravity.</div>`;
+      } else {
+        quotaPoolsList.innerHTML = pools.map(p => {
+          const used = Math.min(100, Math.max(0, p.usedPct || 0));
+          const barColor = used >= 80 ? 'var(--tm-crit)' : (used >= 50 ? 'var(--tm-warn)' : 'var(--tm-ok)');
+          const winTag = p.windowType === 'weekly' ? 'Weekly' : '5h';
+          const resetLabel = p.resetTime ? `Resets in ${formatCountdown(p.msUntilReset)}` : '';
+          return `
+            <div class="quota-pool-item" title="Models: ${escapeHtml((p.models || []).join(', '))}">
+              <div class="quota-pool-top">
+                <span class="quota-pool-left">
+                  <span class="quota-pool-label">${escapeHtml(p.label)}</span>
+                  <span class="quota-win-pill ${p.windowType === 'weekly' ? 'weekly' : ''}">${winTag}</span>
+                </span>
+                <span class="meta-strong" style="color: ${barColor}">${used.toFixed(1)}% used</span>
+              </div>
+              <div class="quota-pool-bar">
+                <div class="quota-pool-fill" style="width: ${used}%; background: ${barColor}"></div>
+              </div>
+              <div class="quota-pool-sub">
+                <span>${p.remainingPct.toFixed(1)}% left · auto-snapshots at 100%</span>
+                <span>${escapeHtml(resetLabel)}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
     const filtered = selectedModel !== 'all' ? (data.byModel?.[selectedModel] || null) : null;
     const tot = filtered || data.current || {};
 
@@ -635,10 +688,20 @@
           const st = s.totals || {};
           const stTotal = st.totalProcessedTokens || 0;
           const isOpen = expandedSnapshotIds.has(s.id);
+          const snapModels = Object.entries(s.byModel || {})
+            .sort((a, b) => (b[1].totalProcessedTokens || 0) - (a[1].totalProcessedTokens || 0));
+          const snapModelsHtml = snapModels.length
+            ? `<div class="snapshot-models">${snapModels.map(([mName, mt]) => `
+                <div class="item-ledger-row">
+                  <span class="routing-pill ${getModelPillClass(mName)}">${escapeHtml(mName)}</span>
+                  <span class="item-ledger-val">${formatCompactNum(mt.totalProcessedTokens || 0)} · ${mt.totalTurns || 0}t</span>
+                </div>
+              `).join('')}</div>`
+            : '';
           return `
             <div class="snapshot-item${isOpen ? ' expanded' : ''}" data-snap-id="${escapeHtml(s.id)}">
               <div class="snapshot-top">
-                <span class="snapshot-name">${escapeHtml(s.name)}</span>
+                <span class="snapshot-name">${s.auto ? '<span class="auto-pill">AUTO</span>' : ''}${escapeHtml(s.name)}</span>
                 <span class="snapshot-right">
                   <span class="meta-strong">${formatCompactNum(stTotal)}</span>
                   <span>${st.totalTurns || 0}t</span>
@@ -653,6 +716,7 @@
                   { dot: 'dot-output', label: 'Response & Tools', value: formatNum(st.responseTokens || 0) },
                   { dot: 'dot-total', label: 'Saved', value: new Date(s.createdAt).toLocaleString() }
                 ])}
+                ${snapModelsHtml}
               </div>
             </div>
           `;
@@ -1232,4 +1296,9 @@
   setInterval(() => {
     if (activeTab !== 'global') fetchTelemetry();
   }, POLL_MS);
+
+  // Background quota-cycle monitor (checks every 60s so 100% auto-snapshots fire even while on Session tab)
+  setInterval(() => {
+    fetchGlobalUsage();
+  }, 60000);
 })();

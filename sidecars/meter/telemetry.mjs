@@ -106,6 +106,10 @@ function resolveModelLimitsFor(models, displayName, modelKey, responseModel) {
 let cachedModels = null;
 let modelsCacheExpiry = 0;
 
+// Cache for current logged-in account
+let cachedAccount = null;
+let accountCacheExpiry = 0;
+
 // Cache for language server credentials
 let cachedCredentials = null;
 let credentialsCacheExpiry = 0;
@@ -319,9 +323,9 @@ export function callLanguageServerRpc(method, body = {}) {
 /**
  * Fetches available models and their token limits with caching.
  */
-export async function getModelLimits() {
+export async function getModelLimits(forceRefresh = false) {
   const now = Date.now();
-  if (cachedModels && now < modelsCacheExpiry) {
+  if (!forceRefresh && cachedModels && now < modelsCacheExpiry) {
     return cachedModels;
   }
 
@@ -329,12 +333,125 @@ export async function getModelLimits() {
     const resp = await callLanguageServerRpc('GetAvailableModels', {});
     const models = resp.response?.models || {};
     cachedModels = models;
-    modelsCacheExpiry = now + 60000; // Cache for 60 seconds
+    modelsCacheExpiry = now + 30000; // Cache for 30 seconds
     return models;
   } catch (err) {
     if (cachedModels) return cachedModels;
     return {};
   }
+}
+
+/**
+ * Fetches the currently logged-in Antigravity account from GetUserStatus.
+ */
+export async function getCurrentAccount() {
+  const now = Date.now();
+  if (cachedAccount && now < accountCacheExpiry) {
+    return cachedAccount;
+  }
+
+  try {
+    const resp = await callLanguageServerRpc('GetUserStatus', {});
+    const us = resp.userStatus || {};
+    const email = (us.email || '').trim();
+    const name = (us.name || '').trim();
+    const planName = (us.planStatus?.planInfo?.planName || '').trim();
+    const accountKey = email ? email.toLowerCase() : 'local-default';
+    cachedAccount = {
+      accountKey,
+      email: email || 'Local Account',
+      name: name || email || 'Local User',
+      planName: planName || 'Standard'
+    };
+    accountCacheExpiry = now + 60000;
+    return cachedAccount;
+  } catch {
+    return cachedAccount || {
+      accountKey: 'local-default',
+      email: 'Local Account',
+      name: 'Local User',
+      planName: 'Standard'
+    };
+  }
+}
+
+/**
+ * Groups available models into their live quota pools (5-hour vs Weekly windows)
+ * using quotaInfo.remainingFraction and quotaInfo.resetTime from GetAvailableModels.
+ */
+export async function getQuotaPools(forceRefresh = false) {
+  const models = await getModelLimits(forceRefresh);
+  const nowMs = Date.now();
+  const buckets = new Map();
+
+  for (const [key, def] of Object.entries(models || {})) {
+    const qi = def?.quotaInfo;
+    if (!qi || qi.remainingFraction === undefined || !qi.resetTime) continue;
+    const displayName = (def.displayName || key).trim();
+    const resetMs = Date.parse(qi.resetTime);
+    if (Number.isNaN(resetMs)) continue;
+
+    const hoursUntilReset = (resetMs - nowMs) / 3600000;
+    const windowType = hoursUntilReset > 8 ? 'weekly' : '5h';
+
+    // Determine family key so pools stay stable even when resetTime advances
+    const lower = `${key} ${displayName}`.toLowerCase();
+    let family = 'other';
+    let familyLabel = 'Other Models';
+    if (lower.includes('claude') || lower.includes('gpt')) {
+      family = 'claude-gpt';
+      familyLabel = 'Claude / GPT';
+    } else if (lower.includes('argon')) {
+      family = 'gemini-argon';
+      familyLabel = 'Gemini Argon';
+    } else if (lower.includes('gemini') || lower.includes('neon') || lower.includes('hydrogen') || lower.includes('flash')) {
+      family = 'gemini-flash-neon';
+      familyLabel = 'Gemini Flash / Neon';
+    }
+
+    const poolId = `${windowType}:${family}`;
+    let bucket = buckets.get(poolId);
+    if (!bucket) {
+      bucket = {
+        poolId,
+        label: familyLabel,
+        windowType,
+        remainingFraction: Number(qi.remainingFraction),
+        resetTime: qi.resetTime,
+        resetMs,
+        models: []
+      };
+      buckets.set(poolId, bucket);
+    } else {
+      // Keep the tightest remainingFraction in the bucket
+      bucket.remainingFraction = Math.min(bucket.remainingFraction, Number(qi.remainingFraction));
+    }
+    if (!bucket.models.includes(displayName)) {
+      bucket.models.push(displayName);
+    }
+  }
+
+  return Array.from(buckets.values())
+    .map(b => {
+      const remFrac = Math.min(1, Math.max(0, b.remainingFraction));
+      const remainingPct = parseFloat((remFrac * 100).toFixed(1));
+      const usedPct = parseFloat(((1 - remFrac) * 100).toFixed(1));
+      return {
+        poolId: b.poolId,
+        label: b.label,
+        windowType: b.windowType,
+        remainingFraction: remFrac,
+        remainingPct,
+        usedPct,
+        resetTime: b.resetTime,
+        msUntilReset: Math.max(0, b.resetMs - nowMs),
+        models: b.models
+      };
+    })
+    .sort((a, b) => {
+      if (a.windowType !== b.windowType) return a.windowType === '5h' ? -1 : 1;
+      return b.usedPct - a.usedPct || a.label.localeCompare(b.label);
+    });
 }
 
 /**
