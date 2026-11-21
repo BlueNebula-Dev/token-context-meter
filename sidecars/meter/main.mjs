@@ -7,8 +7,9 @@
 
 import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getConversationTokenTelemetry, getModelLimits } from './telemetry.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -28,7 +29,8 @@ try {
 } catch {
   // If bare specifier didn't resolve directly, try direct path to central SDK
   try {
-    const directSdk = await import('file:///C:/Users/Gian/.gemini/config/node_modules/sidecar_sdk/index.mjs');
+    const sdkPath = join(homedir(), '.gemini', 'config', 'node_modules', 'sidecar_sdk', 'index.mjs');
+    const directSdk = await import(pathToFileURL(sdkPath).href);
     SidecarApp = directSdk.SidecarApp;
     SidecarResponse = directSdk.Response;
   } catch (err) {
@@ -83,8 +85,11 @@ if (SidecarApp && hasSidecarEnv) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
 
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Restrict CORS to local or sidecar origins only
+    const origin = req.headers.origin || '';
+    if (!origin || /^(https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?|sidecar:\/\/)/i.test(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin || `http://127.0.0.1:${port}`);
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
