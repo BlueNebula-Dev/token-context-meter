@@ -93,9 +93,6 @@
   const telemetryHeaderToggle = document.getElementById('telemetryHeaderToggle');
   const compactAllBtn = document.getElementById('compactAllBtn');
 
-  const windowUtilCompactVal = document.getElementById('windowUtilCompactVal');
-  const activeTurnCompactVal = document.getElementById('activeTurnCompactVal');
-  const sessionCompactVal = document.getElementById('sessionCompactVal');
   const telemetryCompactVal = document.getElementById('telemetryCompactVal');
 
   const viewPromptBtn = document.getElementById('viewPromptBtn');
@@ -104,6 +101,7 @@
 
   const contextPctValue = document.getElementById('contextPctValue');
   const healthBadge = document.getElementById('healthBadge');
+  const windowRatioVal = document.getElementById('windowRatioVal');
   const contextProgressBar = document.getElementById('contextProgressBar');
   const activeTokensVal = document.getElementById('activeTokensVal');
   const remainingTokensVal = document.getElementById('remainingTokensVal');
@@ -117,18 +115,30 @@
   const cacheHitBadge = document.getElementById('cacheHitBadge');
   const turnPromptTotalVal = document.getElementById('turnPromptTotalVal');
   const turnCacheReadVal = document.getElementById('turnCacheReadVal');
+  const turnCachePct = document.getElementById('turnCachePct');
   const turnNewInputVal = document.getElementById('turnNewInputVal');
+  const turnNewInputPct = document.getElementById('turnNewInputPct');
 
   const turnOutputTotalBadge = document.getElementById('turnOutputTotalBadge');
+  const genOutputLimitVal = document.getElementById('genOutputLimitVal');
+  const genThinkBar = document.getElementById('genThinkBar');
+  const genRespBar = document.getElementById('genRespBar');
   const turnThinkingVal = document.getElementById('turnThinkingVal');
+  const turnThinkingPct = document.getElementById('turnThinkingPct');
   const turnResponseVal = document.getElementById('turnResponseVal');
+  const turnResponsePct = document.getElementById('turnResponsePct');
 
   const totalTurnsBadge = document.getElementById('totalTurnsBadge');
   const sessionProcessedVal = document.getElementById('sessionProcessedVal');
   const sessionCacheSavingsVal = document.getElementById('sessionCacheSavingsVal');
+  const sessionCacheTotal = document.getElementById('sessionCacheTotal');
+  const sessionCachePct = document.getElementById('sessionCachePct');
   const sessionInputTotal = document.getElementById('sessionInputTotal');
-  const sessionOutputTotal = document.getElementById('sessionOutputTotal');
+  const sessionInputPct = document.getElementById('sessionInputPct');
   const sessionThinkingTotal = document.getElementById('sessionThinkingTotal');
+  const sessionThinkingPct = document.getElementById('sessionThinkingPct');
+  const sessionOutputTotal = document.getElementById('sessionOutputTotal');
+  const sessionOutputPct = document.getElementById('sessionOutputPct');
 
   function formatNum(num) {
     return (num || 0).toLocaleString();
@@ -236,33 +246,42 @@
       }
     }
 
+    function pctStr(part, total) {
+      if (!total || total <= 0) return '0%';
+      const val = (part / total) * 100;
+      return val > 0 && val < 0.1 ? '<0.1%' : `${val.toFixed(1)}%`;
+    }
+
     // Capacity Percentage & Progress Bar
     const pct = Math.min(100, Math.max(0, ctx.consumptionPct || 0));
-    contextPctValue.textContent = `${pct.toFixed(1)}%`;
+    contextPctValue.textContent = `${pct.toFixed(1)}% used`;
 
     let color = 'var(--tm-ok)'; // Green (< 50%)
-    let healthLabel = 'Optimal Status';
+    let healthLabel = 'Optimal';
 
     if (pct >= 80) {
       color = 'var(--tm-crit)'; // Red (> 80%)
-      healthLabel = 'Critical Status (>80%)';
+      healthLabel = 'Critical';
     } else if (pct >= 50) {
       color = 'var(--tm-warn)'; // Amber (50% - 80%)
-      healthLabel = 'Moderate Status (50-80%)';
+      healthLabel = 'Moderate';
     }
 
     healthBadge.textContent = healthLabel;
     healthBadge.style.color = color;
 
+    if (windowRatioVal) {
+      windowRatioVal.textContent = `${formatCompactNum(ctx.activeTokens)} / ${formatCompactNum(ctx.maxLimit)}`;
+      windowRatioVal.title = `${formatNum(ctx.activeTokens)} / ${formatNum(ctx.maxLimit)} tokens`;
+    }
+
     contextProgressBar.style.width = `${pct}%`;
     contextProgressBar.style.backgroundColor = color;
 
     // Active vs Remaining Tokens
-    activeTokensVal.textContent = `${formatNum(ctx.activeTokens)} active`;
-    activeTokensVal.title = `Active Context: ${formatNum(ctx.activeTokens)} / ${formatNum(ctx.maxLimit)} tokens`;
-    remainingTokensVal.textContent = `${formatNum(ctx.remainingTokens)} remaining`;
-    remainingTokensVal.title = `${ctx.remainingPct || 0}% remaining capacity`;
-    if (windowUtilCompactVal) windowUtilCompactVal.textContent = `${pct.toFixed(1)}% used`;
+    if (activeTokensVal) activeTokensVal.textContent = `${formatNum(ctx.activeTokens)} active`;
+    remainingTokensVal.textContent = `${formatCompactNum(ctx.remainingTokens)} free`;
+    remainingTokensVal.title = `${formatNum(ctx.remainingTokens)} tokens (${ctx.remainingPct || 0}% free)`;
 
     // Compaction Alert
     if (ctx.compactionCount > 0) {
@@ -274,29 +293,56 @@
       compactionAlert.style.display = 'none';
     }
 
-    // Active Turn Breakdown
-    cacheHitBadge.textContent = `${latest.cacheEfficiencyPct || 0}% Cached`;
-    turnPromptTotalVal.textContent = formatNum(latest.promptTokens);
+    // Active Turn Breakdown (uniform 4-column category ledger)
+    const promptTotal = latest.promptTokens || 0;
+    cacheHitBadge.textContent = `${latest.cacheEfficiencyPct || 0}% cached`;
+    turnPromptTotalVal.textContent = `${formatCompactNum(promptTotal)} prompt`;
+    turnPromptTotalVal.title = `${formatNum(promptTotal)} total prompt tokens`;
     turnCacheReadVal.textContent = formatNum(latest.cacheReadTokens);
+    if (turnCachePct) turnCachePct.textContent = pctStr(latest.cacheReadTokens || 0, promptTotal);
     turnNewInputVal.textContent = formatNum(latest.inputTokens);
-    if (activeTurnCompactVal) activeTurnCompactVal.textContent = formatCompactNum(latest.promptTokens);
+    if (turnNewInputPct) turnNewInputPct.textContent = pctStr(latest.inputTokens || 0, promptTotal);
 
-    turnOutputTotalBadge.textContent = formatNum(latest.outputTokens);
-    turnThinkingVal.textContent = formatNum(latest.thinkingTokens);
-    turnResponseVal.textContent = formatNum(latest.responseTokens);
+    // Generation Output Breakdown (split bar + 4-column category ledger)
+    const outTotal = latest.outputTokens || 0;
+    const thinkTok = latest.thinkingTokens || 0;
+    const respTok = latest.responseTokens || 0;
+    const outSum = thinkTok + respTok || outTotal;
+    turnOutputTotalBadge.textContent = formatNum(outTotal);
+    if (genOutputLimitVal) {
+      genOutputLimitVal.textContent = model.maxOutputTokens ? `/ ${formatCompactNum(model.maxOutputTokens)}` : 'tokens';
+    }
+    if (genThinkBar && genRespBar) {
+      const thinkW = outSum > 0 ? (thinkTok / outSum) * 100 : 0;
+      const respW = outSum > 0 ? (respTok / outSum) * 100 : 0;
+      genThinkBar.style.width = `${thinkW.toFixed(1)}%`;
+      genRespBar.style.width = `${respW.toFixed(1)}%`;
+    }
+    turnThinkingVal.textContent = formatNum(thinkTok);
+    if (turnThinkingPct) turnThinkingPct.textContent = pctStr(thinkTok, outSum);
+    turnResponseVal.textContent = formatNum(respTok);
+    if (turnResponsePct) turnResponsePct.textContent = pctStr(respTok, outSum);
 
-    // Cumulative Session Statistics
-    totalTurnsBadge.textContent = `${cum.totalTurns || 0} Turns`;
-    sessionProcessedVal.textContent = formatNum(cum.totalProcessedTokens);
-    sessionCacheSavingsVal.textContent = `${cum.overallCacheSavingsPct || 0}% Re-use Rate`;
-    if (sessionCompactVal) sessionCompactVal.textContent = formatCompactNum(cum.totalProcessedTokens);
+    // Cumulative Session Statistics (uniform 4-column category ledger)
+    const sessTotal = cum.totalProcessedTokens || 0;
+    const sessCache = cum.cacheReadTokens || 0;
+    const sessInput = cum.inputTokens || 0;
+    const sessThink = cum.thinkingTokens || 0;
+    const sessResp = cum.responseTokens || Math.max(0, (cum.outputTokens || 0) - sessThink);
 
-    sessionInputTotal.textContent = formatCompactNum(cum.inputTokens);
-    sessionInputTotal.title = `${formatNum(cum.inputTokens)} total input tokens`;
-    sessionOutputTotal.textContent = formatCompactNum(cum.outputTokens);
-    sessionOutputTotal.title = `${formatNum(cum.outputTokens)} total output tokens`;
-    sessionThinkingTotal.textContent = formatCompactNum(cum.thinkingTokens);
-    sessionThinkingTotal.title = `${formatNum(cum.thinkingTokens)} total thinking tokens`;
+    sessionProcessedVal.textContent = formatCompactNum(sessTotal);
+    sessionProcessedVal.title = `${formatNum(sessTotal)} total processed tokens`;
+    totalTurnsBadge.textContent = `${cum.totalTurns || 0} turns`;
+    sessionCacheSavingsVal.textContent = `${cum.overallCacheSavingsPct || 0}% cached`;
+
+    if (sessionCacheTotal) sessionCacheTotal.textContent = formatNum(sessCache);
+    if (sessionCachePct) sessionCachePct.textContent = pctStr(sessCache, sessTotal);
+    sessionInputTotal.textContent = formatNum(sessInput);
+    if (sessionInputPct) sessionInputPct.textContent = pctStr(sessInput, sessTotal);
+    sessionThinkingTotal.textContent = formatNum(sessThink);
+    if (sessionThinkingPct) sessionThinkingPct.textContent = pctStr(sessThink, sessTotal);
+    sessionOutputTotal.textContent = formatNum(sessResp);
+    if (sessionOutputPct) sessionOutputPct.textContent = pctStr(sessResp, sessTotal);
 
     // Render Telemetry List
     updateToggleButtons();

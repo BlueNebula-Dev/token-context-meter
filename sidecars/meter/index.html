@@ -53,35 +53,31 @@
     <!-- Main Scrollable Ledger -->
     <main class="main-content custom-scrollbar">
 
-      <!-- Window Utilization -->
+      <!-- Window Utilization (mirrors context plugin hero) -->
       <section class="section-block compactable-section" id="secWindowUtil" data-section="windowUtil" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
         <div class="hero-top-row font-mono">
-          <span class="section-label">Window Utilization</span>
-          <span class="section-summary-right">
-            <span class="compact-inline-val" id="windowUtilCompactVal">0.0% used</span>
-            <span class="health-status-text" id="healthBadge">Optimal Status</span>
-          </span>
+          <div class="hero-left">
+            <span class="hero-percent" id="contextPctValue">0.0% used</span>
+            <span class="health-status-text" id="healthBadge">Optimal</span>
+          </div>
+          <span class="hero-ratio" id="windowRatioVal" title="Active / Max Context Tokens">0 / 1M</span>
         </div>
 
         <div class="section-body">
-          <div class="hero-metric-row font-mono">
-            <span class="hero-percent" id="contextPctValue">0.0%</span>
-            <span class="hero-sublabel">used</span>
-          </div>
-
           <div class="bar-track">
             <div class="bar-fill" id="contextProgressBar" style="width: 0%"></div>
           </div>
 
-          <div class="hero-tokens-row font-mono">
-            <span id="activeTokensVal">0 active</span>
-            <span id="remainingTokensVal">0 remaining</span>
+          <div class="hero-meta-row font-mono">
+            <div class="badges-row">
+              <span class="badge model-badge" id="modelNameBadge">Gemini 3.8 Flash</span>
+              <span class="badge multi-model-badge" id="multiModelBadge" style="display: none;">2 Models</span>
+            </div>
+            <span class="hero-remaining" id="remainingTokensVal">0 free</span>
           </div>
 
-          <div class="badges-row font-mono">
-            <span class="badge model-badge" id="modelNameBadge">Gemini 3.8 Flash</span>
-            <span class="badge multi-model-badge" id="multiModelBadge" style="display: none;">2 Models</span>
-          </div>
+          <!-- Hidden legacy span kept for safe JS/test access -->
+          <span id="activeTokensVal" class="sr-only"></span>
 
           <!-- Compaction Alert -->
           <div class="compaction-alert" id="compactionAlert" style="display: none;">
@@ -96,24 +92,24 @@
         <div class="section-header-row">
           <span class="section-label">Active Turn</span>
           <span class="section-summary-right font-mono">
-            <span class="compact-inline-val" id="activeTurnCompactVal">0</span>
-            <span class="cache-rate" id="cacheHitBadge">0.0% Cached</span>
+            <span class="meta-subtle" id="turnPromptTotalVal">0</span>
+            <span class="cache-rate" id="cacheHitBadge">0.0% cached</span>
           </span>
         </div>
 
         <div class="section-body">
-          <div class="ledger-list font-mono">
-            <div class="ledger-row primary-row">
-              <span class="ledger-key">Total Prompt Tokens</span>
-              <span class="ledger-val bold-white" id="turnPromptTotalVal">0</span>
+          <div class="cat-list font-mono">
+            <div class="cat-row">
+              <span class="swatch sw-cache"></span>
+              <span class="cat-label">Cache Read</span>
+              <span class="cat-tok" id="turnCacheReadVal">0</span>
+              <span class="cat-pct" id="turnCachePct">0%</span>
             </div>
-            <div class="ledger-row indent-row">
-              <span class="ledger-key-sub">Cache Read</span>
-              <span class="ledger-val cache-green" id="turnCacheReadVal">0</span>
-            </div>
-            <div class="ledger-row indent-row">
-              <span class="ledger-key-sub">New Input</span>
-              <span class="ledger-val neutral-val" id="turnNewInputVal">0</span>
+            <div class="cat-row">
+              <span class="swatch sw-input"></span>
+              <span class="cat-label">New Input</span>
+              <span class="cat-tok" id="turnNewInputVal">0</span>
+              <span class="cat-pct" id="turnNewInputPct">0%</span>
             </div>
           </div>
         </div>
@@ -123,18 +119,30 @@
       <section class="section-block compactable-section" id="secGenOutput" data-section="genOutput" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
         <div class="section-header-row">
           <span class="section-label">Generation Output</span>
-          <span class="ledger-val bold-purple font-mono" id="turnOutputTotalBadge">0</span>
+          <span class="section-summary-right font-mono">
+            <span class="meta-strong" id="turnOutputTotalBadge">0</span>
+            <span class="meta-subtle" id="genOutputLimitVal">tokens</span>
+          </span>
         </div>
 
         <div class="section-body">
-          <div class="ledger-list font-mono">
-            <div class="ledger-row indent-row">
-              <span class="ledger-key-sub">Thinking</span>
-              <span class="ledger-val thinking-purple" id="turnThinkingVal">0</span>
+          <div class="split-bar-track" aria-label="Thinking vs Response output split">
+            <div class="split-seg seg-think" id="genThinkBar" style="width: 0%"></div>
+            <div class="split-seg seg-output" id="genRespBar" style="width: 0%"></div>
+          </div>
+
+          <div class="cat-list font-mono">
+            <div class="cat-row">
+              <span class="swatch sw-think"></span>
+              <span class="cat-label">Thinking</span>
+              <span class="cat-tok" id="turnThinkingVal">0</span>
+              <span class="cat-pct" id="turnThinkingPct">0%</span>
             </div>
-            <div class="ledger-row indent-row">
-              <span class="ledger-key-sub">Response & Tools</span>
-              <span class="ledger-val neutral-val" id="turnResponseVal">0</span>
+            <div class="cat-row">
+              <span class="swatch sw-output"></span>
+              <span class="cat-label">Response &amp; Tools</span>
+              <span class="cat-tok" id="turnResponseVal">0</span>
+              <span class="cat-pct" id="turnResponsePct">0%</span>
             </div>
           </div>
         </div>
@@ -145,21 +153,38 @@
         <div class="section-header-row">
           <span class="section-label">Session Totals</span>
           <span class="section-summary-right font-mono">
-            <span class="compact-inline-val" id="sessionCompactVal">0</span>
-            <span class="turn-count" id="totalTurnsBadge">0 Turns</span>
+            <span class="meta-strong" id="sessionProcessedVal">0</span>
+            <span class="turn-count" id="totalTurnsBadge">0 turns</span>
+            <span class="cache-rate" id="sessionCacheSavingsVal">0% cached</span>
           </span>
         </div>
 
         <div class="section-body">
-          <div class="session-metric-row font-mono">
-            <div class="session-total-num" id="sessionProcessedVal">0</div>
-            <div class="session-reuse-rate" id="sessionCacheSavingsVal">0.0% Re-use Rate</div>
-          </div>
-
-          <div class="session-summary-row font-mono">
-            <span>In: <strong id="sessionInputTotal" class="summary-strong">0</strong></span>
-            <span>Out: <strong id="sessionOutputTotal" class="summary-strong">0</strong></span>
-            <span>Think: <strong id="sessionThinkingTotal" class="summary-strong">0</strong></span>
+          <div class="cat-list font-mono">
+            <div class="cat-row">
+              <span class="swatch sw-cache"></span>
+              <span class="cat-label">Cache Read</span>
+              <span class="cat-tok" id="sessionCacheTotal">0</span>
+              <span class="cat-pct" id="sessionCachePct">0%</span>
+            </div>
+            <div class="cat-row">
+              <span class="swatch sw-input"></span>
+              <span class="cat-label">New Input</span>
+              <span class="cat-tok" id="sessionInputTotal">0</span>
+              <span class="cat-pct" id="sessionInputPct">0%</span>
+            </div>
+            <div class="cat-row">
+              <span class="swatch sw-think"></span>
+              <span class="cat-label">Thinking</span>
+              <span class="cat-tok" id="sessionThinkingTotal">0</span>
+              <span class="cat-pct" id="sessionThinkingPct">0%</span>
+            </div>
+            <div class="cat-row">
+              <span class="swatch sw-output"></span>
+              <span class="cat-label">Response &amp; Tools</span>
+              <span class="cat-tok" id="sessionOutputTotal">0</span>
+              <span class="cat-pct" id="sessionOutputPct">0%</span>
+            </div>
           </div>
         </div>
       </section>

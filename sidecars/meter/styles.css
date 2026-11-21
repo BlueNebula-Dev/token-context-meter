@@ -307,28 +307,36 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--cx-fg-2);
 }
 
-/* ---------- Hero ---------- */
+/* ---------- Hero (Window Utilization) ---------- */
 .hero-top-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  font-size: 12px;
+  gap: 10px;
 }
-.hero-top-row .section-label {
-  font-size: 12px;
-  color: var(--cx-fg-muted);
-  font-weight: 400;
+.hero-left {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
-.health-status-text { font-size: 12px; font-weight: 500; color: var(--tm-ok); }
-
-.hero-metric-row { display: flex; align-items: baseline; gap: 6px; }
 .hero-percent {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--cx-fg);
 }
-.hero-sublabel { font-size: 15px; font-weight: 600; color: var(--cx-fg); letter-spacing: -0.02em; }
+.health-status-text {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tm-ok);
+}
+.hero-ratio {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--cx-fg-muted);
+  flex-shrink: 0;
+}
 
 .bar-track {
   width: 100%;
@@ -344,14 +352,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transition: width 300ms var(--ease-out), background-color 300ms var(--ease-out);
 }
 
-.hero-tokens-row {
+.hero-meta-row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+.hero-remaining {
   font-size: 12px;
   color: var(--cx-fg-muted);
+  flex-shrink: 0;
 }
 
-.badges-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.badges-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .badge {
   display: inline-flex;
   align-items: center;
@@ -366,6 +380,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--tm-warn);
   background: color-mix(in srgb, var(--tm-warn) 12%, transparent);
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
 
 /* ---------- Compaction ---------- */
 .compaction-alert {
@@ -376,72 +398,73 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .compaction-title { font-size: 12px; font-weight: 500; color: var(--tm-warn); }
 .compaction-desc { font-size: 12px; color: var(--cx-fg-muted); margin-top: 2px; }
 
-/* ---------- Active turn ledger ---------- */
+/* ---------- Unified Category Ledger (Active Turn, Gen Output, Session Totals) ---------- */
 .cache-rate { font-size: 12px; font-weight: 500; color: var(--tm-cache); }
+.meta-strong { font-size: 12px; font-weight: 600; color: var(--cx-fg); }
+.meta-subtle { font-size: 12px; color: var(--cx-fg-muted); }
+.turn-count { font-size: 12px; color: var(--cx-fg-muted); }
 
-.ledger-list { display: flex; flex-direction: column; }
-.ledger-row {
+.cat-list {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+}
+.cat-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto 46px;
   align-items: center;
   gap: 10px;
-  padding: 5px 6px;
+  padding: 4px 6px;
   margin: 0 -6px;
   border-radius: 6px;
+  font-size: 13px;
   transition: background-color 140ms var(--ease-out);
 }
-.primary-row { font-size: 13px; }
-.pt-separator {
-  margin-top: 6px;
-  padding-top: 11px;
-  border-top: 1px solid var(--cx-border);
-  border-radius: 0 0 6px 6px;
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2.5px;
+  justify-self: center;
 }
-.indent-row { padding-left: 24px; font-size: 12px; }
-.ledger-key { color: var(--cx-fg-2); }
-.ledger-key-sub { color: var(--cx-fg-muted); }
-.ledger-val { text-align: right; font-variant-numeric: tabular-nums; }
-.bold-white { color: var(--cx-fg); font-weight: 500; }
-.cache-green { color: var(--tm-cache); }
-.neutral-val { color: var(--cx-fg-2); }
-.bold-purple { color: var(--cx-fg); font-weight: 500; }
-.thinking-purple { color: var(--tm-think); }
-
-/* Swatches before key labels, mirroring the category list */
-.ledger-key::before,
-.ledger-key-sub::before {
-  content: "";
-  display: inline-block;
-  vertical-align: middle;
-  margin-right: 10px;
-  margin-top: -2px;
+.sw-cache { background: var(--tm-cache); }
+.sw-input { background: var(--tm-input); }
+.sw-think { background: var(--tm-think); }
+.sw-output { background: var(--tm-output); }
+.cat-label {
+  color: var(--cx-fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.ledger-key::before { width: 10px; height: 10px; border-radius: 2.5px; background: var(--tm-input); }
-.pt-separator .ledger-key::before { background: var(--tm-output); }
-.indent-row .ledger-key-sub::before { width: 6px; height: 6px; border-radius: 50%; opacity: 0.8; background: var(--cx-fg-muted); }
-.ledger-row:has(#turnCacheReadVal) .ledger-key-sub::before { background: var(--tm-cache); }
-.ledger-row:has(#turnNewInputVal) .ledger-key-sub::before { background: var(--tm-input); }
-.ledger-row:has(#turnThinkingVal) .ledger-key-sub::before { background: var(--tm-think); }
-.ledger-row:has(#turnResponseVal) .ledger-key-sub::before { background: var(--tm-output); }
-
-/* ---------- Session totals ---------- */
-.turn-count { font-size: 12px; color: var(--cx-fg-muted); }
-.session-metric-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+.cat-tok {
+  text-align: right;
+  color: var(--cx-fg);
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
 }
-.session-total-num { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; color: var(--cx-fg); }
-.session-reuse-rate { font-size: 12px; font-weight: 500; color: var(--tm-cache); }
-.session-summary-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
+.cat-pct {
+  text-align: right;
   color: var(--cx-fg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
-.summary-strong { color: var(--cx-fg-2); font-weight: 500; }
+
+/* Split bar for Generation Output */
+.split-bar-track {
+  display: flex;
+  align-items: stretch;
+  gap: 1.5px;
+  height: 6px;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--cx-track);
+  overflow: hidden;
+}
+.split-seg {
+  height: 100%;
+  transition: width 300ms var(--ease-out);
+}
+.seg-think { background: var(--tm-think); }
+.seg-output { background: var(--tm-output); }
 
 /* ---------- Telemetry ---------- */
 .view-toggle {
@@ -646,7 +669,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .pill-btn:hover { background: var(--cx-press); color: var(--cx-fg); }
   .icon-btn:hover { background: var(--cx-press); color: var(--cx-fg); }
   .toggle-btn:hover:not(.active) { color: var(--cx-fg); }
-  .ledger-row:hover, .telemetry-item:hover { background: var(--cx-hover); }
+  .ledger-row:hover, .cat-row:hover, .telemetry-item:hover { background: var(--cx-hover); }
   .popover-item:hover, .section-label-btn:hover { background: var(--cx-hover); color: var(--cx-fg); }
 }
 
