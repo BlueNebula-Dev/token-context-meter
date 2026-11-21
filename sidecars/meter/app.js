@@ -1,11 +1,12 @@
 /**
- * Token & Context Meter - Concept 4: Cardless Editorial Ledger
- * Dynamic Telemetry Controller
+ * Token & Context Meter - Dynamic Telemetry Controller
+ * Supports Session, Agents, and Global tabs, Per-Model filtering,
+ * 3-level Tool Calls drill-down, click-to-compact, and persistent preferences.
  */
 
 (function () {
   const urlParams = new URLSearchParams(window.location.search);
-  const conversationId = urlParams.get('conversationId') || '';
+  const rootConversationId = urlParams.get('conversationId') || '';
   const token = urlParams.get('token') || '';
 
   // Theme sync: follow the Antigravity host background (dark by default)
@@ -31,11 +32,21 @@
     attributeFilter: ['style'],
   });
 
+  // Runtime state
   let currentTelemetry = null;
-  let pollInterval = null;
+  let mainSubagents = [];
+  let globalUsageData = null;
+  let activeTab = 'session'; // 'session' | 'agents' | 'global'
+  let selectedModel = 'all';
+  let inspectedAgent = null; // { conversationId, role } or null
   let activeView = localStorage.getItem('token_meter_view') || 'prompt';
-  // Telemetry item compaction: default mode (all compacted vs all expanded) + per-item overrides
-  // When defaultItemsCompact is true, any newly arriving prompts/steps are compacted automatically.
+
+  // Tool Calls 3-level drill-down state
+  let toolTreeExpanded = false;
+  const expandedToolNames = new Set();
+  const expandedSnapshotIds = new Set();
+
+  // Telemetry item compaction: default mode + per-item overrides
   let defaultItemsCompact = localStorage.getItem('token_meter_items_default_compact') === 'true';
   let itemCompactOverrides = new Set();
   try {
@@ -79,22 +90,33 @@
 
   const POLL_MS = 2500;
 
-  // DOM Elements
-  const statusDot = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
+  // DOM Elements - Header & Nav
   const refreshBtn = document.getElementById('refreshBtn');
   const copyMarkdownBtn = document.getElementById('copyMarkdownBtn');
   const cascadeIdBadge = document.getElementById('cascadeIdBadge');
-
   const headerMenuBtn = document.getElementById('headerMenuBtn');
   const headerMenu = document.getElementById('headerMenu');
+
+  const tabSessionBtn = document.getElementById('tabSessionBtn');
+  const tabAgentsBtn = document.getElementById('tabAgentsBtn');
+  const tabGlobalBtn = document.getElementById('tabGlobalBtn');
+  const agentsCountBadge = document.getElementById('agentsCountBadge');
+  const modelFilterSelect = document.getElementById('modelFilterSelect');
+
+  const tabSession = document.getElementById('tabSession');
+  const tabAgents = document.getElementById('tabAgents');
+  const tabGlobal = document.getElementById('tabGlobal');
+
+  const agentInspectBanner = document.getElementById('agentInspectBanner');
+  const agentInspectLabel = document.getElementById('agentInspectLabel');
+  const backToMainBtn = document.getElementById('backToMainBtn');
+
+  // DOM Elements - Session Tab
   const telemetryMenuBtn = document.getElementById('telemetryMenuBtn');
   const telemetryMenu = document.getElementById('telemetryMenu');
   const telemetryHeaderToggle = document.getElementById('telemetryHeaderToggle');
   const compactAllBtn = document.getElementById('compactAllBtn');
-
   const telemetryCompactVal = document.getElementById('telemetryCompactVal');
-
   const viewPromptBtn = document.getElementById('viewPromptBtn');
   const viewStepBtn = document.getElementById('viewStepBtn');
   const telemetryList = document.getElementById('telemetryList');
@@ -121,12 +143,14 @@
 
   const turnOutputTotalBadge = document.getElementById('turnOutputTotalBadge');
   const genOutputLimitVal = document.getElementById('genOutputLimitVal');
-  const genThinkBar = document.getElementById('genThinkBar');
-  const genRespBar = document.getElementById('genRespBar');
   const turnThinkingVal = document.getElementById('turnThinkingVal');
   const turnThinkingPct = document.getElementById('turnThinkingPct');
   const turnResponseVal = document.getElementById('turnResponseVal');
   const turnResponsePct = document.getElementById('turnResponsePct');
+  const toolCallsRootRow = document.getElementById('toolCallsRootRow');
+  const toolCallsTotalVal = document.getElementById('toolCallsTotalVal');
+  const toolCallsTypesVal = document.getElementById('toolCallsTypesVal');
+  const toolCallsTree = document.getElementById('toolCallsTree');
 
   const totalTurnsBadge = document.getElementById('totalTurnsBadge');
   const sessionProcessedVal = document.getElementById('sessionProcessedVal');
@@ -140,6 +164,36 @@
   const sessionOutputTotal = document.getElementById('sessionOutputTotal');
   const sessionOutputPct = document.getElementById('sessionOutputPct');
 
+  // DOM Elements - Agents Tab
+  const agentsSummaryMeta = document.getElementById('agentsSummaryMeta');
+  const agentsList = document.getElementById('agentsList');
+
+  // DOM Elements - Global Tab
+  const globalTotalVal = document.getElementById('globalTotalVal');
+  const globalMetaVal = document.getElementById('globalMetaVal');
+  const globalCacheVal = document.getElementById('globalCacheVal');
+  const globalBaselineNote = document.getElementById('globalBaselineNote');
+  const globalCacheTotal = document.getElementById('globalCacheTotal');
+  const globalCachePct = document.getElementById('globalCachePct');
+  const globalInputTotal = document.getElementById('globalInputTotal');
+  const globalInputPct = document.getElementById('globalInputPct');
+  const globalThinkingTotal = document.getElementById('globalThinkingTotal');
+  const globalThinkingPct = document.getElementById('globalThinkingPct');
+  const globalOutputTotal = document.getElementById('globalOutputTotal');
+  const globalOutputPct = document.getElementById('globalOutputPct');
+  const snapshotNameInput = document.getElementById('snapshotNameInput');
+  const storeSnapshotBtn = document.getElementById('storeSnapshotBtn');
+  const resetGlobalBtn = document.getElementById('resetGlobalBtn');
+  const exportGlobalBtn = document.getElementById('exportGlobalBtn');
+  const importGlobalBtn = document.getElementById('importGlobalBtn');
+  const importGlobalFile = document.getElementById('importGlobalFile');
+  const secGlobalByModel = document.getElementById('secGlobalByModel');
+  const globalModelCountVal = document.getElementById('globalModelCountVal');
+  const globalModelsList = document.getElementById('globalModelsList');
+  const snapshotsCountVal = document.getElementById('snapshotsCountVal');
+  const snapshotsList = document.getElementById('snapshotsList');
+
+  // Helpers
   function formatNum(num) {
     return (num || 0).toLocaleString();
   }
@@ -156,6 +210,12 @@
       return (val / 1_000).toFixed(1) + 'K';
     }
     return val.toLocaleString();
+  }
+
+  function pctStr(part, total) {
+    if (!total || total <= 0) return '0%';
+    const val = (part / total) * 100;
+    return val > 0 && val < 0.1 ? '<0.1%' : `${val.toFixed(1)}%`;
   }
 
   function truncate(str, maxLen = 24) {
@@ -178,8 +238,8 @@
     const lower = name.toLowerCase();
     if (lower.includes('high')) return 'flash-high';
     if (lower.includes('low')) return 'flash-low';
-    if (lower.includes('pro')) return 'pro';
-    if (lower.includes('argon')) return 'argon';
+    if (lower.includes('pro') || lower.includes('opus')) return 'pro';
+    if (lower.includes('argon') || lower.includes('neon')) return 'argon';
     return '';
   }
 
@@ -190,80 +250,159 @@
     return 'cache-low';
   }
 
+  function apiUrl(path, extraParams = {}) {
+    const q = new URLSearchParams();
+    if (token) q.set('token', token);
+    for (const [k, v] of Object.entries(extraParams)) {
+      if (v) q.set(k, v);
+    }
+    const qs = q.toString();
+    return qs ? `${path}?${qs}` : path;
+  }
+
+  // ---------- Fetching ----------
   async function fetchTelemetry() {
     try {
-      const q = new URLSearchParams();
-      if (conversationId) q.set('conversationId', conversationId);
-      if (token) q.set('token', token);
-
-      const res = await fetch(`/api/tokens?${q.toString()}`);
+      const targetId = inspectedAgent?.conversationId || rootConversationId;
+      const res = await fetch(apiUrl('/api/tokens', { conversationId: targetId }));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
       currentTelemetry = data;
-      renderDashboard(data);
-
-      if (statusDot) {
-        statusDot.style.background = 'var(--tm-ok)';
+      if (!inspectedAgent && Array.isArray(data.subagents)) {
+        mainSubagents = data.subagents;
       }
-      if (statusText) statusText.textContent = '2.5s live';
+
+      updateModelDropdown();
+      renderDashboard(data);
+      renderAgentsList();
     } catch (err) {
       console.warn('Telemetry sync error:', err.message);
-      if (statusDot) {
-        statusDot.style.background = 'var(--tm-crit)';
-      }
-      if (statusText) statusText.textContent = 'Reconnecting';
     }
   }
 
-  function renderDashboard(data) {
-    const ctx = data.liveContext || {};
-    const latest = data.latestTurn || {};
-    const cum = data.cumulative || {};
-    const model = data.activeModel || {};
+  async function fetchGlobalUsage() {
+    try {
+      const res = await fetch(apiUrl('/api/global'));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
 
-    // Header Cascade ID
+      globalUsageData = data;
+      updateModelDropdown();
+      renderGlobalView(data);
+      if (data.pendingCount > 0 && activeTab === 'global') {
+        setTimeout(() => { if (activeTab === 'global') fetchGlobalUsage(); }, 250);
+      }
+    } catch (err) {
+      console.warn('Global usage sync error:', err.message);
+    }
+  }
+
+  // ---------- Per-Model Dropdown ----------
+  function updateModelDropdown() {
+    if (!modelFilterSelect) return;
+    let models = [];
+    if (activeTab === 'global' && globalUsageData?.byModel) {
+      models = Object.keys(globalUsageData.byModel);
+    } else if (currentTelemetry) {
+      models = Object.keys(currentTelemetry.modelStats || {});
+      if (!models.length && currentTelemetry.sessionModels?.length) {
+        models = currentTelemetry.sessionModels;
+      }
+    }
+
+    const prev = selectedModel;
+    if (prev !== 'all' && !models.includes(prev)) {
+      selectedModel = 'all';
+    }
+
+    const opts = [`<option value="all">All Models</option>`]
+      .concat(models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`));
+    const html = opts.join('');
+    if (modelFilterSelect.innerHTML !== html) {
+      modelFilterSelect.innerHTML = html;
+    }
+    modelFilterSelect.value = selectedModel;
+  }
+
+  // ---------- Session Dashboard Rendering ----------
+  function renderDashboard(data) {
+    if (!data) return;
+    const ctx = data.liveContext || {};
+    const allModelStats = data.modelStats || {};
+    const filteredModel = selectedModel !== 'all' ? allModelStats[selectedModel] : null;
+
+    const latest = filteredModel?.latestTurn || data.latestTurn || {};
+    const cum = filteredModel
+      ? {
+          totalTurns: filteredModel.turnsCount,
+          inputTokens: filteredModel.inputTokens,
+          cacheReadTokens: filteredModel.cacheReadTokens,
+          outputTokens: filteredModel.outputTokens,
+          thinkingTokens: filteredModel.thinkingTokens,
+          responseTokens: filteredModel.responseTokens,
+          totalProcessedTokens: filteredModel.totalProcessedTokens,
+          overallCacheSavingsPct: filteredModel.cacheEfficiencyPct
+        }
+      : (data.cumulative || {});
+    const model = filteredModel
+      ? {
+          displayName: filteredModel.displayName,
+          maxContextTokens: filteredModel.maxContextTokens,
+          maxOutputTokens: filteredModel.maxOutputTokens
+        }
+      : (data.activeModel || {});
+
+    // Header Convo ID (no "Cascade · " prefix)
     const shortId = data.cascadeId ? data.cascadeId.slice(0, 8) : 'active';
-    cascadeIdBadge.textContent = `Cascade · ${shortId}`;
-    cascadeIdBadge.title = `Cascade ID: ${data.cascadeId || 'Active'}`;
+    cascadeIdBadge.textContent = shortId;
+    cascadeIdBadge.title = `Conversation ID: ${data.cascadeId || 'Active'}`;
+
+    // Subagent inspection banner
+    if (agentInspectBanner) {
+      if (inspectedAgent) {
+        agentInspectBanner.classList.remove('hidden');
+        if (agentInspectLabel) {
+          agentInspectLabel.textContent = `Agent: ${inspectedAgent.role} (${shortId})`;
+        }
+      } else {
+        agentInspectBanner.classList.add('hidden');
+      }
+    }
 
     // Model badges
-    const latestModel = latest.modelDisplayName || model.displayName || 'Gemini 3.8 Flash';
-    modelNameBadge.textContent = latestModel;
+    const displayModelName = filteredModel?.displayName || latest.modelDisplayName || model.displayName || 'Gemini 3.8 Flash';
+    modelNameBadge.textContent = displayModelName;
 
-    if (data.isMultiModel && data.sessionModels && data.sessionModels.length > 1) {
-      modelNameBadge.title = `Latest turn model: ${latestModel}\nSession models (${data.sessionModels.length}):\n• ${data.sessionModels.join('\n• ')}`;
+    if (!filteredModel && data.isMultiModel && data.sessionModels && data.sessionModels.length > 1) {
+      modelNameBadge.title = `Latest turn model: ${displayModelName}\nSession models (${data.sessionModels.length}):\n• ${data.sessionModels.join('\n• ')}`;
       if (multiModelBadge) {
         multiModelBadge.style.display = 'inline-flex';
         multiModelBadge.textContent = `${data.sessionModels.length} Models`;
         multiModelBadge.title = `Multiple models used across session:\n• ${data.sessionModels.join('\n• ')}`;
       }
     } else {
-      modelNameBadge.title = `Handled by ${latestModel}`;
-      if (multiModelBadge) {
-        multiModelBadge.style.display = 'none';
-      }
+      modelNameBadge.title = `Model: ${displayModelName}`;
+      if (multiModelBadge) multiModelBadge.style.display = 'none';
     }
 
-    function pctStr(part, total) {
-      if (!total || total <= 0) return '0%';
-      const val = (part / total) * 100;
-      return val > 0 && val < 0.1 ? '<0.1%' : `${val.toFixed(1)}%`;
-    }
+    // Window Utilization (uses model's context ceiling when filtered)
+    const activeTok = filteredModel ? (latest.totalTurnTokens || 0) : (ctx.activeTokens || 0);
+    const maxLim = model.maxContextTokens || ctx.maxLimit || 1048576;
+    const pct = Math.min(100, Math.max(0, maxLim > 0 ? (activeTok / maxLim) * 100 : 0));
+    const remTok = Math.max(0, maxLim - activeTok);
 
-    // Capacity Percentage & Progress Bar
-    const pct = Math.min(100, Math.max(0, ctx.consumptionPct || 0));
     contextPctValue.textContent = `${pct.toFixed(1)}% used`;
 
-    let color = 'var(--tm-ok)'; // Green (< 50%)
+    let color = 'var(--tm-ok)';
     let healthLabel = 'Optimal';
-
     if (pct >= 80) {
-      color = 'var(--tm-crit)'; // Red (> 80%)
+      color = 'var(--tm-crit)';
       healthLabel = 'Critical';
     } else if (pct >= 50) {
-      color = 'var(--tm-warn)'; // Amber (50% - 80%)
+      color = 'var(--tm-warn)';
       healthLabel = 'Moderate';
     }
 
@@ -271,17 +410,16 @@
     healthBadge.style.color = color;
 
     if (windowRatioVal) {
-      windowRatioVal.textContent = `${formatCompactNum(ctx.activeTokens)} / ${formatCompactNum(ctx.maxLimit)}`;
-      windowRatioVal.title = `${formatNum(ctx.activeTokens)} / ${formatNum(ctx.maxLimit)} tokens`;
+      windowRatioVal.textContent = `${formatCompactNum(activeTok)} / ${formatCompactNum(maxLim)}`;
+      windowRatioVal.title = `${formatNum(activeTok)} / ${formatNum(maxLim)} tokens`;
     }
 
     contextProgressBar.style.width = `${pct}%`;
     contextProgressBar.style.backgroundColor = color;
 
-    // Active vs Remaining Tokens
-    if (activeTokensVal) activeTokensVal.textContent = `${formatNum(ctx.activeTokens)} active`;
-    remainingTokensVal.textContent = `${formatCompactNum(ctx.remainingTokens)} free`;
-    remainingTokensVal.title = `${formatNum(ctx.remainingTokens)} tokens (${ctx.remainingPct || 0}% free)`;
+    if (activeTokensVal) activeTokensVal.textContent = `${formatNum(activeTok)} active`;
+    remainingTokensVal.textContent = `${formatCompactNum(remTok)} free`;
+    remainingTokensVal.title = `${formatNum(remTok)} tokens free`;
 
     // Compaction Alert
     if (ctx.compactionCount > 0) {
@@ -293,7 +431,7 @@
       compactionAlert.style.display = 'none';
     }
 
-    // Active Turn Breakdown (uniform 4-column category ledger)
+    // Active Turn Breakdown
     const promptTotal = latest.promptTokens || 0;
     cacheHitBadge.textContent = `${latest.cacheEfficiencyPct || 0}% cached`;
     turnPromptTotalVal.textContent = `${formatCompactNum(promptTotal)} prompt`;
@@ -303,7 +441,7 @@
     turnNewInputVal.textContent = formatNum(latest.inputTokens);
     if (turnNewInputPct) turnNewInputPct.textContent = pctStr(latest.inputTokens || 0, promptTotal);
 
-    // Generation Output Breakdown (split bar + 4-column category ledger)
+    // Generation Output Breakdown + 3-Level Tool Calls Tree
     const outTotal = latest.outputTokens || 0;
     const thinkTok = latest.thinkingTokens || 0;
     const respTok = latest.responseTokens || 0;
@@ -312,18 +450,17 @@
     if (genOutputLimitVal) {
       genOutputLimitVal.textContent = model.maxOutputTokens ? `/ ${formatCompactNum(model.maxOutputTokens)}` : 'tokens';
     }
-    if (genThinkBar && genRespBar) {
-      const thinkW = outSum > 0 ? (thinkTok / outSum) * 100 : 0;
-      const respW = outSum > 0 ? (respTok / outSum) * 100 : 0;
-      genThinkBar.style.width = `${thinkW.toFixed(1)}%`;
-      genRespBar.style.width = `${respW.toFixed(1)}%`;
-    }
     turnThinkingVal.textContent = formatNum(thinkTok);
     if (turnThinkingPct) turnThinkingPct.textContent = pctStr(thinkTok, outSum);
     turnResponseVal.textContent = formatNum(respTok);
     if (turnResponsePct) turnResponsePct.textContent = pctStr(respTok, outSum);
 
-    // Cumulative Session Statistics (uniform 4-column category ledger)
+    const tcSummary = filteredModel
+      ? (data.toolCalls?.byModel?.[filteredModel.displayName] || { totalCalls: 0, tools: [] })
+      : (data.toolCalls || { totalCalls: 0, tools: [] });
+    renderToolCallsTree(tcSummary);
+
+    // Cumulative Session Statistics
     const sessTotal = cum.totalProcessedTokens || 0;
     const sessCache = cum.cacheReadTokens || 0;
     const sessInput = cum.inputTokens || 0;
@@ -344,20 +481,191 @@
     sessionOutputTotal.textContent = formatNum(sessResp);
     if (sessionOutputPct) sessionOutputPct.textContent = pctStr(sessResp, sessTotal);
 
-    // Render Telemetry List
+    // Telemetry List
     updateToggleButtons();
     renderTelemetryList();
   }
 
+  // ---------- 3-Level Tool Calls Drill-Down ----------
+  function renderToolCallsTree(summary) {
+    const total = summary?.totalCalls || 0;
+    const tools = summary?.tools || [];
+    if (toolCallsTotalVal) toolCallsTotalVal.textContent = formatNum(total);
+    if (toolCallsTypesVal) toolCallsTypesVal.textContent = `${tools.length} tool${tools.length === 1 ? '' : 's'}`;
+
+    if (toolCallsRootRow) {
+      toolCallsRootRow.classList.toggle('expanded', toolTreeExpanded);
+      toolCallsRootRow.setAttribute('aria-expanded', String(toolTreeExpanded));
+    }
+    if (!toolCallsTree) return;
+    toolCallsTree.classList.toggle('hidden', !toolTreeExpanded);
+    if (!toolTreeExpanded) return;
+
+    if (!tools.length) {
+      toolCallsTree.innerHTML = `<div class="tool-target-row">No tool calls recorded</div>`;
+      return;
+    }
+
+    toolCallsTree.innerHTML = tools.map(tool => {
+      const isOpen = expandedToolNames.has(tool.name);
+      const targetsHtml = (tool.targets || []).map(tg => `
+        <div class="tool-target-row" title="${escapeHtml(tg.label)}">
+          <span class="tool-target-label">${escapeHtml(tg.label)}</span>
+          <span class="tool-target-count">${formatNum(tg.count)}</span>
+        </div>
+      `).join('');
+
+      return `
+        <div class="tool-node${isOpen ? ' expanded' : ''}" data-tool-name="${escapeHtml(tool.name)}">
+          <div class="tool-node-row" role="button" tabindex="0" aria-expanded="${isOpen}" title="Click to show specific targets for ${escapeHtml(tool.name)}">
+            <span class="tool-node-name">
+              <svg class="tree-chev" width="11" height="11" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
+              <span>${escapeHtml(tool.name)}</span>
+            </span>
+            <span class="tool-node-count">${formatNum(tool.count)}</span>
+          </div>
+          <div class="tool-targets-list">${targetsHtml}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // ---------- Agents Tab Rendering ----------
+  function renderAgentsList() {
+    const subs = mainSubagents || [];
+    if (agentsCountBadge) {
+      agentsCountBadge.textContent = String(subs.length);
+      agentsCountBadge.classList.toggle('hidden', subs.length === 0);
+    }
+    if (agentsSummaryMeta) {
+      agentsSummaryMeta.textContent = `${subs.length} agent${subs.length === 1 ? '' : 's'}`;
+    }
+    if (!agentsList) return;
+    if (!subs.length) {
+      agentsList.innerHTML = `<div class="empty-state">No subagents spawned in this conversation yet.</div>`;
+      return;
+    }
+
+    agentsList.innerHTML = subs.map((s) => {
+      const shortId = s.conversationId ? s.conversationId.slice(0, 8) : 'pending';
+      const clickable = Boolean(s.conversationId);
+      return `
+        <div class="agent-item" data-agent-id="${escapeHtml(s.conversationId || '')}" data-agent-role="${escapeHtml(s.role || s.typeName)}" role="button" tabindex="0" title="${clickable ? 'Click to inspect subagent telemetry' : 'No conversation ID available'}">
+          <div class="agent-item-top">
+            <span class="agent-role">${escapeHtml(s.role || s.typeName)}</span>
+            <span class="routing-pill ${getModelPillClass(s.modelDisplayName)}">${escapeHtml(s.modelDisplayName || s.requestedModel || 'inherit')}</span>
+          </div>
+          <div class="agent-meta">
+            <span>${escapeHtml(s.typeName)} · ${escapeHtml(shortId)} · ${s.totalTurns || 0} turns</span>
+            <span>${formatCompactNum(s.totalProcessedTokens || 0)} tok</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // ---------- Global Usage Rendering ----------
+  function renderGlobalView(data) {
+    if (!data) return;
+    const filtered = selectedModel !== 'all' ? (data.byModel?.[selectedModel] || null) : null;
+    const tot = filtered || data.current || {};
+
+    const totalProc = tot.totalProcessedTokens || 0;
+    const gCache = tot.cacheReadTokens || 0;
+    const gInput = tot.inputTokens || 0;
+    const gThink = tot.thinkingTokens || 0;
+    const gResp = tot.responseTokens || Math.max(0, (tot.outputTokens || 0) - gThink);
+
+    if (globalTotalVal) globalTotalVal.textContent = formatCompactNum(totalProc);
+    if (globalMetaVal) {
+      globalMetaVal.textContent = filtered
+        ? `${tot.totalTurns || 0} turns`
+        : `${data.conversationCount || 0} chats · ${tot.totalTurns || 0} turns`;
+    }
+    if (globalCacheVal) globalCacheVal.textContent = `${tot.cacheEfficiencyPct || '0.0'}% cached`;
+    if (globalBaselineNote) {
+      if (data.pendingCount > 0) {
+        globalBaselineNote.textContent = `Scanning local chats… (${data.pendingCount} remaining)`;
+      } else {
+        globalBaselineNote.textContent = data.baselineAt
+          ? `Since reset: ${new Date(data.baselineAt).toLocaleString()}`
+          : 'All-time local usage across Antigravity chats';
+      }
+    }
+
+    if (globalCacheTotal) globalCacheTotal.textContent = formatNum(gCache);
+    if (globalCachePct) globalCachePct.textContent = pctStr(gCache, totalProc);
+    if (globalInputTotal) globalInputTotal.textContent = formatNum(gInput);
+    if (globalInputPct) globalInputPct.textContent = pctStr(gInput, totalProc);
+    if (globalThinkingTotal) globalThinkingTotal.textContent = formatNum(gThink);
+    if (globalThinkingPct) globalThinkingPct.textContent = pctStr(gThink, totalProc);
+    if (globalOutputTotal) globalOutputTotal.textContent = formatNum(gResp);
+    if (globalOutputPct) globalOutputPct.textContent = pctStr(gResp, totalProc);
+
+    // Per-Model Breakdown
+    const modelEntries = Object.entries(data.byModel || {})
+      .sort((a, b) => (b[1].totalProcessedTokens || 0) - (a[1].totalProcessedTokens || 0));
+    if (globalModelCountVal) globalModelCountVal.textContent = `${modelEntries.length} model${modelEntries.length === 1 ? '' : 's'}`;
+    if (secGlobalByModel) secGlobalByModel.classList.toggle('hidden', selectedModel !== 'all');
+    if (globalModelsList) {
+      if (!modelEntries.length) {
+        globalModelsList.innerHTML = `<div class="empty-state">No model usage recorded since reset.</div>`;
+      } else {
+        globalModelsList.innerHTML = modelEntries.map(([mName, mTot]) => `
+          <div class="global-model-row">
+            <span class="routing-pill ${getModelPillClass(mName)}">${escapeHtml(mName)}</span>
+            <span class="global-model-right">
+              <span>${mTot.totalTurns || 0}t</span>
+              <span class="cache-rate">${mTot.cacheEfficiencyPct || '0.0'}%</span>
+              <span class="meta-strong">${formatCompactNum(mTot.totalProcessedTokens || 0)}</span>
+            </span>
+          </div>
+        `).join('');
+      }
+    }
+
+    // Stored Snapshots
+    const snaps = data.snapshots || [];
+    if (snapshotsCountVal) snapshotsCountVal.textContent = `${snaps.length} saved`;
+    if (snapshotsList) {
+      if (!snaps.length) {
+        snapshotsList.innerHTML = `<div class="empty-state">No snapshots stored yet.</div>`;
+      } else {
+        snapshotsList.innerHTML = snaps.map(s => {
+          const st = s.totals || {};
+          const stTotal = st.totalProcessedTokens || 0;
+          const isOpen = expandedSnapshotIds.has(s.id);
+          return `
+            <div class="snapshot-item${isOpen ? ' expanded' : ''}" data-snap-id="${escapeHtml(s.id)}">
+              <div class="snapshot-top">
+                <span class="snapshot-name">${escapeHtml(s.name)}</span>
+                <span class="snapshot-right">
+                  <span class="meta-strong">${formatCompactNum(stTotal)}</span>
+                  <span>${st.totalTurns || 0}t</span>
+                  <button type="button" class="snapshot-del-btn" data-del-snap="${escapeHtml(s.id)}" title="Delete snapshot">✕</button>
+                </span>
+              </div>
+              <div class="snapshot-details">
+                ${renderLedgerRows([
+                  { dot: 'dot-cache', label: 'Cache Read', value: formatNum(st.cacheReadTokens || 0), valClass: 'val-cache' },
+                  { dot: 'dot-input', label: 'New Input', value: formatNum(st.inputTokens || 0) },
+                  { dot: 'dot-think', label: 'Thinking', value: formatNum(st.thinkingTokens || 0), valClass: 'val-think' },
+                  { dot: 'dot-output', label: 'Response & Tools', value: formatNum(st.responseTokens || 0) },
+                  { dot: 'dot-total', label: 'Saved', value: new Date(s.createdAt).toLocaleString() }
+                ])}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+  }
+
+  // ---------- Telemetry List Rendering ----------
   function updateToggleButtons() {
     if (viewPromptBtn && viewStepBtn) {
-      if (activeView === 'prompt') {
-        viewPromptBtn.classList.add('active');
-        viewStepBtn.classList.remove('active');
-      } else {
-        viewStepBtn.classList.add('active');
-        viewPromptBtn.classList.remove('active');
-      }
+      viewPromptBtn.classList.toggle('active', activeView === 'prompt');
+      viewStepBtn.classList.toggle('active', activeView === 'step');
     }
   }
 
@@ -365,11 +673,17 @@
     if (!currentTelemetry || !telemetryList) return;
 
     if (activeView === 'prompt') {
-      const prompts = currentTelemetry.recentPrompts || currentTelemetry.prompts || [];
+      let prompts = currentTelemetry.recentPrompts || currentTelemetry.prompts || [];
+      if (selectedModel !== 'all') {
+        prompts = prompts.filter(p => (p.modelsUsed || []).includes(selectedModel));
+      }
       if (telemetryCompactVal) telemetryCompactVal.textContent = `· ${prompts.length} prompt${prompts.length === 1 ? '' : 's'}`;
       renderPromptList(prompts);
     } else {
-      const turns = currentTelemetry.recentTurns || currentTelemetry.turns || [];
+      let turns = currentTelemetry.recentTurns || currentTelemetry.turns || [];
+      if (selectedModel !== 'all') {
+        turns = turns.filter(t => t.modelDisplayName === selectedModel);
+      }
       if (telemetryCompactVal) telemetryCompactVal.textContent = `· ${turns.length} step${turns.length === 1 ? '' : 's'}`;
       renderStepList(turns);
     }
@@ -380,10 +694,7 @@
     if (stepIndices.length === 1) return { label: String(stepIndices[0]), title: `Step ${stepIndices[0]}` };
     const first = stepIndices[0];
     const last = stepIndices[stepIndices.length - 1];
-    return {
-      label: `${first}–${last}`,
-      title: `Steps ${stepIndices.join(', ')}`
-    };
+    return { label: `${first}–${last}`, title: `Steps ${stepIndices.join(', ')}` };
   }
 
   function renderLedgerRows(rows) {
@@ -417,7 +728,6 @@
         ).join('<span class="routing-arrow">→</span>');
       }
 
-      // Dynamic priority for single-line top row: Chat -> Model -> Call counts -> Cache
       const showChatPrimary = telemetryFields.chat && Boolean(previewText);
       const promoteModelToTop = !showChatPrimary && Boolean(routingHtml);
       const hasLeadingItem = showChatPrimary || promoteModelToTop;
@@ -493,7 +803,224 @@
     }).join('');
   }
 
-  // Apply persisted section visibility, section compact states & checkbox states
+  // ---------- Tab Switching ----------
+  function switchTab(tab) {
+    activeTab = tab;
+    if (tabSession) tabSession.classList.toggle('hidden', tab !== 'session');
+    if (tabAgents) tabAgents.classList.toggle('hidden', tab !== 'agents');
+    if (tabGlobal) tabGlobal.classList.toggle('hidden', tab !== 'global');
+
+    [tabSessionBtn, tabAgentsBtn, tabGlobalBtn].forEach(btn => {
+      if (!btn) return;
+      const on = btn.dataset.tab === tab;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', String(on));
+    });
+
+    if (modelFilterSelect) {
+      modelFilterSelect.style.visibility = tab === 'agents' ? 'hidden' : 'visible';
+    }
+
+    updateModelDropdown();
+    if (tab === 'global') {
+      fetchGlobalUsage();
+    } else if (tab === 'agents') {
+      renderAgentsList();
+    } else if (currentTelemetry) {
+      renderDashboard(currentTelemetry);
+    }
+  }
+
+  [tabSessionBtn, tabAgentsBtn, tabGlobalBtn].forEach(btn => {
+    if (btn) btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  if (modelFilterSelect) {
+    modelFilterSelect.addEventListener('change', () => {
+      selectedModel = modelFilterSelect.value || 'all';
+      if (activeTab === 'global' && globalUsageData) {
+        renderGlobalView(globalUsageData);
+      } else if (currentTelemetry) {
+        renderDashboard(currentTelemetry);
+      }
+    });
+  }
+
+  // ---------- Agents Interactions ----------
+  if (agentsList) {
+    agentsList.addEventListener('click', (e) => {
+      const item = e.target.closest('.agent-item');
+      const agentId = item?.dataset?.agentId;
+      if (!agentId) return;
+      inspectedAgent = { conversationId: agentId, role: item.dataset.agentRole || 'Subagent' };
+      selectedModel = 'all';
+      switchTab('session');
+      fetchTelemetry();
+    });
+  }
+
+  if (backToMainBtn) {
+    backToMainBtn.addEventListener('click', () => {
+      inspectedAgent = null;
+      selectedModel = 'all';
+      fetchTelemetry();
+    });
+  }
+
+  // ---------- Tool Calls 3-Level Interactions ----------
+  if (toolCallsRootRow) {
+    toolCallsRootRow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toolTreeExpanded = !toolTreeExpanded;
+      if (currentTelemetry) {
+        const filteredModel = selectedModel !== 'all' ? currentTelemetry.modelStats?.[selectedModel] : null;
+        const summary = filteredModel
+          ? (currentTelemetry.toolCalls?.byModel?.[filteredModel.displayName] || { totalCalls: 0, tools: [] })
+          : (currentTelemetry.toolCalls || { totalCalls: 0, tools: [] });
+        renderToolCallsTree(summary);
+      }
+    });
+  }
+
+  if (toolCallsTree) {
+    toolCallsTree.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const row = e.target.closest('.tool-node-row');
+      const node = row?.closest('.tool-node');
+      const toolName = node?.dataset?.toolName;
+      if (!toolName) return;
+      if (expandedToolNames.has(toolName)) expandedToolNames.delete(toolName);
+      else expandedToolNames.add(toolName);
+      const isOpen = expandedToolNames.has(toolName);
+      node.classList.toggle('expanded', isOpen);
+      row.setAttribute('aria-expanded', String(isOpen));
+    });
+  }
+
+  // ---------- Global Usage Interactions ----------
+  if (storeSnapshotBtn) {
+    storeSnapshotBtn.addEventListener('click', async () => {
+      const orig = storeSnapshotBtn.textContent;
+      storeSnapshotBtn.disabled = true;
+      storeSnapshotBtn.textContent = 'Saving…';
+      try {
+        const res = await fetch(apiUrl('/api/global/snapshot'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: snapshotNameInput?.value || '' })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        if (snapshotNameInput) snapshotNameInput.value = '';
+        await fetchGlobalUsage();
+      } catch (err) {
+        console.error('Store snapshot failed:', err);
+      } finally {
+        storeSnapshotBtn.disabled = false;
+        storeSnapshotBtn.textContent = orig;
+      }
+    });
+  }
+
+  let resetConfirmTimer = null;
+  if (resetGlobalBtn) {
+    resetGlobalBtn.addEventListener('click', async () => {
+      if (!resetGlobalBtn.classList.contains('confirming')) {
+        resetGlobalBtn.classList.add('confirming');
+        resetGlobalBtn.textContent = 'Confirm Reset?';
+        clearTimeout(resetConfirmTimer);
+        resetConfirmTimer = setTimeout(() => {
+          resetGlobalBtn.classList.remove('confirming');
+          resetGlobalBtn.textContent = 'Reset';
+        }, 4000);
+        return;
+      }
+      clearTimeout(resetConfirmTimer);
+      resetGlobalBtn.classList.remove('confirming');
+      resetGlobalBtn.textContent = 'Resetting…';
+      try {
+        const res = await fetch(apiUrl('/api/global/reset'), { method: 'POST' });
+        const data = await res.json();
+        if (!data.error) {
+          globalUsageData = data;
+          renderGlobalView(data);
+        }
+      } catch (err) {
+        console.error('Reset global usage failed:', err);
+      } finally {
+        resetGlobalBtn.textContent = 'Reset';
+      }
+    });
+  }
+
+  if (exportGlobalBtn) {
+    exportGlobalBtn.addEventListener('click', () => {
+      if (!globalUsageData) return;
+      const blob = new Blob([JSON.stringify(globalUsageData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `token-context-meter-global-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  if (importGlobalBtn && importGlobalFile) {
+    importGlobalBtn.addEventListener('click', () => importGlobalFile.click());
+    importGlobalFile.addEventListener('change', async () => {
+      const file = importGlobalFile.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        const res = await fetch(apiUrl('/api/global/import'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(json)
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await fetchGlobalUsage();
+      } catch (err) {
+        console.error('Import failed:', err);
+      } finally {
+        importGlobalFile.value = '';
+      }
+    });
+  }
+
+  if (snapshotsList) {
+    snapshotsList.addEventListener('click', async (e) => {
+      const delBtn = e.target.closest('[data-del-snap]');
+      if (delBtn) {
+        e.stopPropagation();
+        const id = delBtn.dataset.delSnap;
+        try {
+          await fetch(apiUrl('/api/global/snapshot/delete'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+          });
+          expandedSnapshotIds.delete(id);
+          await fetchGlobalUsage();
+        } catch (err) {
+          console.error('Delete snapshot failed:', err);
+        }
+        return;
+      }
+      const item = e.target.closest('.snapshot-item');
+      const id = item?.dataset?.snapId;
+      if (!id) return;
+      if (expandedSnapshotIds.has(id)) expandedSnapshotIds.delete(id);
+      else expandedSnapshotIds.add(id);
+      item.classList.toggle('expanded', expandedSnapshotIds.has(id));
+    });
+  }
+
+  // ---------- Section Visibility, Compact & Popovers ----------
   function applySectionStates() {
     document.querySelectorAll('[data-section]').forEach((sec) => {
       const key = sec.dataset.section;
@@ -526,11 +1053,10 @@
     applySectionStates();
   }
 
-  // Click / keyboard to compact Window Util, Active Turn, Gen Output, Session Totals
   document.querySelectorAll('.compactable-section').forEach((sec) => {
     sec.addEventListener('click', (e) => {
       if (window.getSelection && String(window.getSelection()).length) return;
-      if (e.target.closest('button, input, label, .popover-menu')) return;
+      if (e.target.closest('button, input, label, select, .popover-menu, .tool-tree-toggle, .tool-tree-list')) return;
       toggleSectionCompact(sec.dataset.section);
     });
     sec.addEventListener('keydown', (e) => {
@@ -542,12 +1068,9 @@
   });
 
   if (telemetryHeaderToggle) {
-    telemetryHeaderToggle.addEventListener('click', () => {
-      toggleSectionCompact('telemetry');
-    });
+    telemetryHeaderToggle.addEventListener('click', () => toggleSectionCompact('telemetry'));
   }
 
-  // Popover menus (⋮) in header and telemetry
   function closeAllMenus() {
     if (headerMenu) headerMenu.classList.remove('open');
     if (headerMenuBtn) headerMenuBtn.setAttribute('aria-expanded', 'false');
@@ -615,7 +1138,7 @@
   updateCompactAllBtn();
   applySectionStates();
 
-  // Click / keyboard toggle to compact individual telemetry items
+  // Telemetry Item Click / Keyboard Toggle
   function toggleItem(el) {
     const key = el?.dataset?.key;
     if (!key) return;
@@ -642,7 +1165,6 @@
     });
   }
 
-  // View toggle button listeners
   if (viewPromptBtn) {
     viewPromptBtn.addEventListener('click', () => {
       activeView = 'prompt';
@@ -661,7 +1183,7 @@
     });
   }
 
-  // Copy Markdown Summary matching /context CLI output
+  // Copy Markdown Summary
   if (copyMarkdownBtn) {
     copyMarkdownBtn.addEventListener('click', () => {
       if (!currentTelemetry) return;
@@ -681,6 +1203,7 @@
         `  - Output: ${formatNum(lat.outputTokens)} tokens (Reasoning/Thinking: ${formatNum(lat.thinkingTokens)}, Output: ${formatNum(lat.responseTokens)})`,
         `- **Session Cumulative (${cum.totalTurns} turns):**`,
         `  - Total Processed: ${formatNum(cum.totalProcessedTokens)} tokens`,
+        `  - Tool Calls: ${formatNum(t.toolCalls?.totalCalls || 0)}`,
         `  - Cache Efficiency: ${cum.overallCacheSavingsPct}% overall reuse rate`,
         ctx.compactionCount > 0 ? `- **Compaction Events:** ${ctx.compactionCount} history compaction checkpoints` : null
       ].filter(Boolean).join('\n');
@@ -699,11 +1222,14 @@
 
   if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
-      fetchTelemetry();
+      if (activeTab === 'global') fetchGlobalUsage();
+      else fetchTelemetry();
     });
   }
 
-  // Initial load & Start polling
+  // Initial load & polling
   fetchTelemetry();
-  pollInterval = setInterval(fetchTelemetry, POLL_MS);
+  setInterval(() => {
+    if (activeTab !== 'global') fetchTelemetry();
+  }, POLL_MS);
 })();

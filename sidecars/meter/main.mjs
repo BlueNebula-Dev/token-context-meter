@@ -11,6 +11,34 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getConversationTokenTelemetry, getModelLimits } from './telemetry.mjs';
+import {
+  getGlobalUsage,
+  saveGlobalSnapshot,
+  resetGlobalUsage,
+  deleteGlobalSnapshot,
+  importGlobalData
+} from './global-store.mjs';
+
+function readJsonBody(req, maxBytes = 2 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        req.destroy();
+        reject(new Error('Request body too large'));
+        return;
+      }
+      body += chunk;
+    });
+    req.on('end', () => {
+      if (!body.trim()) return resolve({});
+      try { resolve(JSON.parse(body)); } catch (e) { reject(new Error(`Invalid JSON: ${e.message}`)); }
+    });
+    req.on('error', reject);
+  });
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -77,6 +105,46 @@ if (SidecarApp && hasSidecarEnv) {
     }
   }, 'GET');
 
+  app.api('/api/global', async () => {
+    try {
+      return await getGlobalUsage();
+    } catch (err) {
+      return { error: err.message };
+    }
+  }, 'GET');
+
+  app.api('/api/global/snapshot', async (data) => {
+    try {
+      return await saveGlobalSnapshot(data?.name || '');
+    } catch (err) {
+      return { error: err.message };
+    }
+  }, 'POST');
+
+  app.api('/api/global/reset', async () => {
+    try {
+      return await resetGlobalUsage();
+    } catch (err) {
+      return { error: err.message };
+    }
+  }, 'POST');
+
+  app.api('/api/global/snapshot/delete', async (data) => {
+    try {
+      return deleteGlobalSnapshot(data?.id || '');
+    } catch (err) {
+      return { error: err.message };
+    }
+  }, 'POST');
+
+  app.api('/api/global/import', async (data) => {
+    try {
+      return await importGlobalData(data);
+    } catch (err) {
+      return { error: err.message };
+    }
+  }, 'POST');
+
   app.run();
   console.log(`[TokenContextMeter] Sidecar initialized on port ${process.env.ANTIGRAVITY_SIDECAR_WEB_PORT}`);
 } else {
@@ -90,7 +158,7 @@ if (SidecarApp && hasSidecarEnv) {
     if (!origin || /^(https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?|sidecar:\/\/)/i.test(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin || `http://127.0.0.1:${port}`);
     }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
@@ -130,6 +198,69 @@ if (SidecarApp && hasSidecarEnv) {
         const models = await getModelLimits();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(models));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/global' && req.method === 'GET') {
+      try {
+        const data = await getGlobalUsage();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/global/snapshot' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const data = await saveGlobalSnapshot(body?.name || '');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/global/reset' && req.method === 'POST') {
+      try {
+        const data = await resetGlobalUsage();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/global/snapshot/delete' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const data = deleteGlobalSnapshot(body?.id || '');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (url.pathname === '/api/global/import' && req.method === 'POST') {
+      try {
+        const body = await readJsonBody(req);
+        const data = await importGlobalData(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));

@@ -15,13 +15,9 @@
     <header class="header">
       <div class="header-left">
         <div class="header-title">Context Meter</div>
-        <div class="header-sub font-mono" id="cascadeIdBadge" title="Active conversation ID">Cascade · ...</div>
+        <div class="header-sub font-mono" id="cascadeIdBadge" title="Active conversation ID">...</div>
       </div>
       <div class="header-actions">
-        <span class="live-status font-mono">
-          <span class="status-dot-pulse" id="statusDot"></span>
-          <span id="statusText">2.5s live</span>
-        </span>
         <button class="pill-btn" id="copyMarkdownBtn" title="Copy /context prompt summary">
           /context
         </button>
@@ -50,188 +46,311 @@
       </div>
     </header>
 
-    <!-- Main Scrollable Ledger -->
+    <!-- Compact 3-Tab Strip + Per-Model Dropdown -->
+    <nav class="subbar" aria-label="Views and model filter">
+      <div class="view-toggle nav-tabs" role="tablist">
+        <button type="button" class="toggle-btn active" id="tabSessionBtn" data-tab="session" role="tab" aria-selected="true">Session</button>
+        <button type="button" class="toggle-btn" id="tabAgentsBtn" data-tab="agents" role="tab" aria-selected="false">
+          Agents <span class="tab-count hidden" id="agentsCountBadge">0</span>
+        </button>
+        <button type="button" class="toggle-btn" id="tabGlobalBtn" data-tab="global" role="tab" aria-selected="false">Global</button>
+      </div>
+      <select id="modelFilterSelect" class="model-select" title="Filter stats by model" aria-label="Filter by model">
+        <option value="all">All Models</option>
+      </select>
+    </nav>
+
+    <!-- Main Scrollable Area -->
     <main class="main-content custom-scrollbar">
 
-      <!-- Window Utilization (mirrors context plugin hero) -->
-      <section class="section-block compactable-section" id="secWindowUtil" data-section="windowUtil" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
-        <div class="hero-top-row font-mono">
-          <div class="hero-left">
-            <span class="hero-percent" id="contextPctValue">0.0% used</span>
-            <span class="health-status-text" id="healthBadge">Optimal</span>
+      <!-- ============ SESSION TAB ============ -->
+      <div id="tabSession" class="tab-pane">
+
+        <!-- Active Subagent Inspection Banner -->
+        <div id="agentInspectBanner" class="agent-banner hidden">
+          <div class="agent-banner-info">
+            <span class="agent-banner-label" id="agentInspectLabel">Viewing Subagent</span>
           </div>
-          <span class="hero-ratio" id="windowRatioVal" title="Active / Max Context Tokens">0 / 1M</span>
+          <button type="button" class="pill-btn" id="backToMainBtn">← Main</button>
         </div>
 
-        <div class="section-body">
-          <div class="bar-track">
-            <div class="bar-fill" id="contextProgressBar" style="width: 0%"></div>
+        <!-- Window Utilization -->
+        <section class="section-block compactable-section" id="secWindowUtil" data-section="windowUtil" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
+          <div class="hero-top-row font-mono">
+            <div class="hero-left">
+              <span class="hero-percent" id="contextPctValue">0.0% used</span>
+              <span class="health-status-text" id="healthBadge">Optimal</span>
+            </div>
+            <span class="hero-ratio" id="windowRatioVal" title="Active / Max Context Tokens">0 / 1M</span>
           </div>
 
-          <div class="hero-meta-row font-mono">
-            <div class="badges-row">
-              <span class="badge model-badge" id="modelNameBadge">Gemini 3.8 Flash</span>
-              <span class="badge multi-model-badge" id="multiModelBadge" style="display: none;">2 Models</span>
+          <div class="section-body">
+            <div class="bar-track">
+              <div class="bar-fill" id="contextProgressBar" style="width: 0%"></div>
             </div>
-            <span class="hero-remaining" id="remainingTokensVal">0 free</span>
-          </div>
 
-          <!-- Hidden legacy span kept for safe JS/test access -->
-          <span id="activeTokensVal" class="sr-only"></span>
-
-          <!-- Compaction Alert -->
-          <div class="compaction-alert" id="compactionAlert" style="display: none;">
-            <div class="compaction-title font-mono" id="compactionTitle">Context Compaction Active</div>
-            <div class="compaction-desc" id="compactionDesc">History checkpoints summarized earlier turns.</div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Active Turn Breakdown -->
-      <section class="section-block compactable-section" id="secActiveTurn" data-section="activeTurn" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
-        <div class="section-header-row">
-          <span class="section-label">Active Turn</span>
-          <span class="section-summary-right font-mono">
-            <span class="meta-subtle" id="turnPromptTotalVal">0</span>
-            <span class="cache-rate" id="cacheHitBadge">0.0% cached</span>
-          </span>
-        </div>
-
-        <div class="section-body">
-          <div class="cat-list font-mono">
-            <div class="cat-row">
-              <span class="swatch sw-cache"></span>
-              <span class="cat-label">Cache Read</span>
-              <span class="cat-tok" id="turnCacheReadVal">0</span>
-              <span class="cat-pct" id="turnCachePct">0%</span>
+            <div class="hero-meta-row font-mono">
+              <div class="badges-row">
+                <span class="badge model-badge" id="modelNameBadge">Gemini 3.8 Flash</span>
+                <span class="badge multi-model-badge" id="multiModelBadge" style="display: none;">2 Models</span>
+              </div>
+              <span class="hero-remaining" id="remainingTokensVal">0 free</span>
             </div>
-            <div class="cat-row">
-              <span class="swatch sw-input"></span>
-              <span class="cat-label">New Input</span>
-              <span class="cat-tok" id="turnNewInputVal">0</span>
-              <span class="cat-pct" id="turnNewInputPct">0%</span>
+
+            <span id="activeTokensVal" class="sr-only"></span>
+
+            <!-- Compaction Alert -->
+            <div class="compaction-alert" id="compactionAlert" style="display: none;">
+              <div class="compaction-title font-mono" id="compactionTitle">Context Compaction Active</div>
+              <div class="compaction-desc" id="compactionDesc">History checkpoints summarized earlier turns.</div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- Generation Output Breakdown -->
-      <section class="section-block compactable-section" id="secGenOutput" data-section="genOutput" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
-        <div class="section-header-row">
-          <span class="section-label">Generation Output</span>
-          <span class="section-summary-right font-mono">
-            <span class="meta-strong" id="turnOutputTotalBadge">0</span>
-            <span class="meta-subtle" id="genOutputLimitVal">tokens</span>
-          </span>
-        </div>
-
-        <div class="section-body">
-          <div class="split-bar-track" aria-label="Thinking vs Response output split">
-            <div class="split-seg seg-think" id="genThinkBar" style="width: 0%"></div>
-            <div class="split-seg seg-output" id="genRespBar" style="width: 0%"></div>
+        <!-- Active Turn Breakdown -->
+        <section class="section-block compactable-section" id="secActiveTurn" data-section="activeTurn" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
+          <div class="section-header-row">
+            <span class="section-label">Active Turn</span>
+            <span class="section-summary-right font-mono">
+              <span class="meta-subtle" id="turnPromptTotalVal">0</span>
+              <span class="cache-rate" id="cacheHitBadge">0.0% cached</span>
+            </span>
           </div>
 
-          <div class="cat-list font-mono">
-            <div class="cat-row">
-              <span class="swatch sw-think"></span>
-              <span class="cat-label">Thinking</span>
-              <span class="cat-tok" id="turnThinkingVal">0</span>
-              <span class="cat-pct" id="turnThinkingPct">0%</span>
-            </div>
-            <div class="cat-row">
-              <span class="swatch sw-output"></span>
-              <span class="cat-label">Response &amp; Tools</span>
-              <span class="cat-tok" id="turnResponseVal">0</span>
-              <span class="cat-pct" id="turnResponsePct">0%</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Cumulative Session Statistics -->
-      <section class="section-block compactable-section" id="secSessionTotals" data-section="sessionTotals" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
-        <div class="section-header-row">
-          <span class="section-label">Session Totals</span>
-          <span class="section-summary-right font-mono">
-            <span class="meta-strong" id="sessionProcessedVal">0</span>
-            <span class="turn-count" id="totalTurnsBadge">0 turns</span>
-            <span class="cache-rate" id="sessionCacheSavingsVal">0% cached</span>
-          </span>
-        </div>
-
-        <div class="section-body">
-          <div class="cat-list font-mono">
-            <div class="cat-row">
-              <span class="swatch sw-cache"></span>
-              <span class="cat-label">Cache Read</span>
-              <span class="cat-tok" id="sessionCacheTotal">0</span>
-              <span class="cat-pct" id="sessionCachePct">0%</span>
-            </div>
-            <div class="cat-row">
-              <span class="swatch sw-input"></span>
-              <span class="cat-label">New Input</span>
-              <span class="cat-tok" id="sessionInputTotal">0</span>
-              <span class="cat-pct" id="sessionInputPct">0%</span>
-            </div>
-            <div class="cat-row">
-              <span class="swatch sw-think"></span>
-              <span class="cat-label">Thinking</span>
-              <span class="cat-tok" id="sessionThinkingTotal">0</span>
-              <span class="cat-pct" id="sessionThinkingPct">0%</span>
-            </div>
-            <div class="cat-row">
-              <span class="swatch sw-output"></span>
-              <span class="cat-label">Response &amp; Tools</span>
-              <span class="cat-tok" id="sessionOutputTotal">0</span>
-              <span class="cat-pct" id="sessionOutputPct">0%</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Telemetry Section -->
-      <section class="section-block pb-6" id="secTelemetry" data-section="telemetry">
-        <div class="section-header-row">
-          <button type="button" class="section-label-btn" id="telemetryHeaderToggle" aria-expanded="true" title="Click to compact Telemetry">
-            <span class="section-label">Telemetry</span>
-            <span class="compact-inline-val font-mono" id="telemetryCompactVal"></span>
-          </button>
-          <div class="telemetry-controls">
-            <div class="view-toggle font-mono">
-              <button class="toggle-btn active" id="viewPromptBtn" data-view="prompt" title="Group telemetry by user prompt">By Prompt</button>
-              <button class="toggle-btn" id="viewStepBtn" data-view="step" title="Detailed per-step LLM calls">By Step</button>
-            </div>
-            <button class="icon-btn" id="compactAllBtn" title="Compact all telemetry items" aria-pressed="false">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 5.5 8 2.5 13 5.5"/>
-                <path d="M3 10.5 8 13.5 13 10.5"/>
-              </svg>
-            </button>
-            <div class="menu-anchor">
-              <button class="icon-btn" id="telemetryMenuBtn" title="Telemetry display fields" aria-haspopup="true" aria-expanded="false">
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
-                  <circle cx="8" cy="3" r="1.3"/>
-                  <circle cx="8" cy="8" r="1.3"/>
-                  <circle cx="8" cy="13" r="1.3"/>
-                </svg>
-              </button>
-              <div class="popover-menu" id="telemetryMenu" role="menu" aria-label="Telemetry fields">
-                <div class="popover-title">Show Fields (Priority)</div>
-                <label class="popover-item"><input type="checkbox" data-field-toggle="chat" checked><span>Chat</span></label>
-                <label class="popover-item"><input type="checkbox" data-field-toggle="model" checked><span>Model</span></label>
-                <label class="popover-item"><input type="checkbox" data-field-toggle="calls" checked><span>Call counts</span></label>
-                <label class="popover-item"><input type="checkbox" data-field-toggle="cache" checked><span>Cache</span></label>
+          <div class="section-body">
+            <div class="cat-list font-mono">
+              <div class="cat-row">
+                <span class="swatch sw-cache"></span>
+                <span class="cat-label">Cache Read</span>
+                <span class="cat-tok" id="turnCacheReadVal">0</span>
+                <span class="cat-pct" id="turnCachePct">0%</span>
+              </div>
+              <div class="cat-row">
+                <span class="swatch sw-input"></span>
+                <span class="cat-label">New Input</span>
+                <span class="cat-tok" id="turnNewInputVal">0</span>
+                <span class="cat-pct" id="turnNewInputPct">0%</span>
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div class="section-body">
-          <div class="telemetry-list font-mono" id="telemetryList">
-            <div class="empty-state font-mono">Loading telemetry records...</div>
+        <!-- Generation Output Breakdown (no bar, with 3-level Tool Calls drill-down) -->
+        <section class="section-block compactable-section" id="secGenOutput" data-section="genOutput" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
+          <div class="section-header-row">
+            <span class="section-label">Generation Output</span>
+            <span class="section-summary-right font-mono">
+              <span class="meta-strong" id="turnOutputTotalBadge">0</span>
+              <span class="meta-subtle" id="genOutputLimitVal">tokens</span>
+            </span>
           </div>
-        </div>
-      </section>
+
+          <div class="section-body">
+            <div class="cat-list font-mono">
+              <div class="cat-row">
+                <span class="swatch sw-think"></span>
+                <span class="cat-label">Thinking</span>
+                <span class="cat-tok" id="turnThinkingVal">0</span>
+                <span class="cat-pct" id="turnThinkingPct">0%</span>
+              </div>
+              <div class="cat-row">
+                <span class="swatch sw-output"></span>
+                <span class="cat-label">Response &amp; Tools</span>
+                <span class="cat-tok" id="turnResponseVal">0</span>
+                <span class="cat-pct" id="turnResponsePct">0%</span>
+              </div>
+              <div class="cat-row tool-tree-toggle" id="toolCallsRootRow" role="button" tabindex="0" aria-expanded="false" title="Click to expand tool call counts">
+                <span class="swatch sw-tools"></span>
+                <span class="cat-label-chev">
+                  <span class="cat-label">Tool Calls</span>
+                  <svg class="tree-chev" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
+                </span>
+                <span class="cat-tok" id="toolCallsTotalVal">0</span>
+                <span class="cat-pct" id="toolCallsTypesVal">0 tools</span>
+              </div>
+            </div>
+            <!-- Level 2 & Level 3 Tool Calls Drill-Down -->
+            <div class="tool-tree-list hidden font-mono" id="toolCallsTree"></div>
+          </div>
+        </section>
+
+        <!-- Cumulative Session Statistics -->
+        <section class="section-block compactable-section" id="secSessionTotals" data-section="sessionTotals" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
+          <div class="section-header-row">
+            <span class="section-label">Session Totals</span>
+            <span class="section-summary-right font-mono">
+              <span class="meta-strong" id="sessionProcessedVal">0</span>
+              <span class="turn-count" id="totalTurnsBadge">0 turns</span>
+              <span class="cache-rate" id="sessionCacheSavingsVal">0% cached</span>
+            </span>
+          </div>
+
+          <div class="section-body">
+            <div class="cat-list font-mono">
+              <div class="cat-row">
+                <span class="swatch sw-cache"></span>
+                <span class="cat-label">Cache Read</span>
+                <span class="cat-tok" id="sessionCacheTotal">0</span>
+                <span class="cat-pct" id="sessionCachePct">0%</span>
+              </div>
+              <div class="cat-row">
+                <span class="swatch sw-input"></span>
+                <span class="cat-label">New Input</span>
+                <span class="cat-tok" id="sessionInputTotal">0</span>
+                <span class="cat-pct" id="sessionInputPct">0%</span>
+              </div>
+              <div class="cat-row">
+                <span class="swatch sw-think"></span>
+                <span class="cat-label">Thinking</span>
+                <span class="cat-tok" id="sessionThinkingTotal">0</span>
+                <span class="cat-pct" id="sessionThinkingPct">0%</span>
+              </div>
+              <div class="cat-row">
+                <span class="swatch sw-output"></span>
+                <span class="cat-label">Response &amp; Tools</span>
+                <span class="cat-tok" id="sessionOutputTotal">0</span>
+                <span class="cat-pct" id="sessionOutputPct">0%</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Telemetry Section -->
+        <section class="section-block pb-6" id="secTelemetry" data-section="telemetry">
+          <div class="section-header-row">
+            <button type="button" class="section-label-btn" id="telemetryHeaderToggle" aria-expanded="true" title="Click to compact Telemetry">
+              <span class="section-label">Telemetry</span>
+              <span class="compact-inline-val font-mono" id="telemetryCompactVal"></span>
+            </button>
+            <div class="telemetry-controls">
+              <div class="view-toggle font-mono">
+                <button class="toggle-btn active" id="viewPromptBtn" data-view="prompt" title="Group telemetry by user prompt">By Prompt</button>
+                <button class="toggle-btn" id="viewStepBtn" data-view="step" title="Detailed per-step LLM calls">By Step</button>
+              </div>
+              <button class="icon-btn" id="compactAllBtn" title="Compact all telemetry items" aria-pressed="false">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 5.5 8 2.5 13 5.5"/>
+                  <path d="M3 10.5 8 13.5 13 10.5"/>
+                </svg>
+              </button>
+              <div class="menu-anchor">
+                <button class="icon-btn" id="telemetryMenuBtn" title="Telemetry display fields" aria-haspopup="true" aria-expanded="false">
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+                    <circle cx="8" cy="3" r="1.3"/>
+                    <circle cx="8" cy="8" r="1.3"/>
+                    <circle cx="8" cy="13" r="1.3"/>
+                  </svg>
+                </button>
+                <div class="popover-menu" id="telemetryMenu" role="menu" aria-label="Telemetry fields">
+                  <div class="popover-title">Show Fields (Priority)</div>
+                  <label class="popover-item"><input type="checkbox" data-field-toggle="chat" checked><span>Chat</span></label>
+                  <label class="popover-item"><input type="checkbox" data-field-toggle="model" checked><span>Model</span></label>
+                  <label class="popover-item"><input type="checkbox" data-field-toggle="calls" checked><span>Call counts</span></label>
+                  <label class="popover-item"><input type="checkbox" data-field-toggle="cache" checked><span>Cache</span></label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-body">
+            <div class="telemetry-list font-mono" id="telemetryList">
+              <div class="empty-state font-mono">Loading telemetry records...</div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- ============ AGENTS TAB ============ -->
+      <div id="tabAgents" class="tab-pane hidden">
+        <section class="section-block">
+          <div class="section-header-row">
+            <span class="section-label">Subagents</span>
+            <span class="meta-subtle font-mono" id="agentsSummaryMeta">0 agents</span>
+          </div>
+          <div id="agentsList" class="agents-list font-mono">
+            <div class="empty-state">No subagents spawned in this conversation yet.</div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ============ GLOBAL TAB ============ -->
+      <div id="tabGlobal" class="tab-pane hidden">
+        <section class="section-block">
+          <div class="section-header-row">
+            <span class="section-label">Global Usage</span>
+            <span class="section-summary-right font-mono">
+              <span class="meta-strong" id="globalTotalVal">0</span>
+              <span class="turn-count" id="globalMetaVal">0 chats</span>
+              <span class="cache-rate" id="globalCacheVal">0% cached</span>
+            </span>
+          </div>
+          <div class="meta-subtle font-mono" id="globalBaselineNote">Since all time</div>
+
+          <div class="cat-list font-mono">
+            <div class="cat-row">
+              <span class="swatch sw-cache"></span>
+              <span class="cat-label">Cache Read</span>
+              <span class="cat-tok" id="globalCacheTotal">0</span>
+              <span class="cat-pct" id="globalCachePct">0%</span>
+            </div>
+            <div class="cat-row">
+              <span class="swatch sw-input"></span>
+              <span class="cat-label">New Input</span>
+              <span class="cat-tok" id="globalInputTotal">0</span>
+              <span class="cat-pct" id="globalInputPct">0%</span>
+            </div>
+            <div class="cat-row">
+              <span class="swatch sw-think"></span>
+              <span class="cat-label">Thinking</span>
+              <span class="cat-tok" id="globalThinkingTotal">0</span>
+              <span class="cat-pct" id="globalThinkingPct">0%</span>
+            </div>
+            <div class="cat-row">
+              <span class="swatch sw-output"></span>
+              <span class="cat-label">Response &amp; Tools</span>
+              <span class="cat-tok" id="globalOutputTotal">0</span>
+              <span class="cat-pct" id="globalOutputPct">0%</span>
+            </div>
+          </div>
+
+          <!-- Global Controls: Store Snapshot, Reset, Export / Import -->
+          <div class="global-controls">
+            <div class="snapshot-form">
+              <input type="text" id="snapshotNameInput" class="text-input" placeholder="Snapshot name (auto-date if blank)" maxlength="64">
+              <button type="button" class="pill-btn primary-pill" id="storeSnapshotBtn">Store</button>
+            </div>
+            <div class="global-action-row">
+              <button type="button" class="pill-btn danger-pill" id="resetGlobalBtn">Reset</button>
+              <button type="button" class="pill-btn" id="exportGlobalBtn">Export JSON</button>
+              <button type="button" class="pill-btn" id="importGlobalBtn">Import JSON</button>
+              <input type="file" id="importGlobalFile" accept=".json,application/json" class="sr-only">
+            </div>
+          </div>
+        </section>
+
+        <!-- Global Per-Model Breakdown -->
+        <section class="section-block" id="secGlobalByModel">
+          <div class="section-header-row">
+            <span class="section-label">By Model</span>
+            <span class="meta-subtle font-mono" id="globalModelCountVal">0 models</span>
+          </div>
+          <div id="globalModelsList" class="global-models-list font-mono">
+            <div class="empty-state">No model usage recorded yet.</div>
+          </div>
+        </section>
+
+        <!-- Stored Snapshots -->
+        <section class="section-block pb-6">
+          <div class="section-header-row">
+            <span class="section-label">Stored Snapshots</span>
+            <span class="meta-subtle font-mono" id="snapshotsCountVal">0 saved</span>
+          </div>
+          <div id="snapshotsList" class="snapshots-list font-mono">
+            <div class="empty-state">No snapshots stored yet.</div>
+          </div>
+        </section>
+      </div>
 
     </main>
   </div>

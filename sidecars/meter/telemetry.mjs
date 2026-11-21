@@ -10,7 +10,97 @@ import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+function extractToolTargetLabel(name, argsJson) {
+  let args = {};
+  if (typeof argsJson === 'string' && argsJson.trim()) {
+    try { args = JSON.parse(argsJson); } catch {}
+  } else if (argsJson && typeof argsJson === 'object') {
+    args = argsJson;
+  }
+
+  const filePath = args.Path || args.AbsolutePath || args.TargetFile || args.path || args.file;
+  if (typeof filePath === 'string' && filePath.trim()) {
+    const clean = filePath.replace(/\\/g, '/');
+    return basename(clean) || clean;
+  }
+  if (name === 'run_command') {
+    if (typeof args.toolSummary === 'string' && args.toolSummary.trim()) {
+      return args.toolSummary.trim().slice(0, 42);
+    }
+    if (typeof args.CommandLine === 'string' && args.CommandLine.trim()) {
+      return args.CommandLine.trim().replace(/\s+/g, ' ').slice(0, 42);
+    }
+  }
+  if (name === 'call_mcp_tool' && args.ServerName && args.ToolName) {
+    return `${args.ServerName}/${args.ToolName}`;
+  }
+  if (name === 'invoke_subagent') {
+    const t = args.TypeName || 'subagent';
+    return args.Role ? `${t}: ${args.Role}` : t;
+  }
+  if (name === 'ask_question' && Array.isArray(args.questions) && args.questions[0]?.question) {
+    return String(args.questions[0].question).trim().slice(0, 42);
+  }
+  if (typeof args.query === 'string' && args.query.trim()) {
+    return args.query.trim().slice(0, 42);
+  }
+  for (const val of Object.values(args)) {
+    if (typeof val === 'string' && val.trim()) {
+      return val.trim().replace(/\s+/g, ' ').slice(0, 42);
+    }
+  }
+  return '(default)';
+}
+
+function buildToolCallsSummary(entries) {
+  const toolMap = new Map();
+  let totalCalls = 0;
+
+  for (const entry of entries) {
+    totalCalls += 1;
+    let rec = toolMap.get(entry.name);
+    if (!rec) {
+      rec = { name: entry.name, count: 0, targets: new Map() };
+      toolMap.set(entry.name, rec);
+    }
+    rec.count += 1;
+    rec.targets.set(entry.target, (rec.targets.get(entry.target) || 0) + 1);
+  }
+
+  const tools = Array.from(toolMap.values())
+    .map(r => ({
+      name: r.name,
+      count: r.count,
+      targets: Array.from(r.targets.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  return { totalCalls, tools };
+}
+
+function resolveModelLimitsFor(models, displayName, modelKey, responseModel) {
+  let maxContextTokens = 1048576;
+  let maxOutputTokens = 65536;
+  let resolvedName = displayName || 'Default Model';
+
+  for (const [key, modelDef] of Object.entries(models || {})) {
+    if (modelDef.displayName === displayName ||
+        (modelKey && modelDef.model === modelKey) ||
+        (responseModel && (key === responseModel || key.includes(responseModel)))) {
+      maxContextTokens = modelDef.maxTokens || maxContextTokens;
+      maxOutputTokens = modelDef.maxOutputTokens || maxOutputTokens;
+      resolvedName = modelDef.displayName || resolvedName;
+      break;
+    }
+  }
+  return { maxContextTokens, maxOutputTokens, displayName: resolvedName };
+}
 
 // Cache for model definitions
 let cachedModels = null;
@@ -477,6 +567,146 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
     healthStatus = 'moderate';
   }
 
+  // 3. Map step indices -> modelDisplayName & collect 3-level tool call stats + subagents
+  const stepToModel = new Map();
+  for (const t of turns) {
+    for (const sIdx of (t.stepIndices || [])) {
+      stepToModel.set(sIdx, t.modelDisplayName);
+    }
+  }
+
+  const allToolEntries = [];
+  const toolEntriesByModel = new Map();
+  const discoveredSubagents = [];
+  const seenSubIds = new Set();
+
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    const tcs = s.plannerResponse?.toolCalls || [];
+    if (!Array.isArray(tcs) || !tcs.length) continue;
+    const stepModel = stepToModel.get(i) || activeModelDisplayName;
+
+    for (let tIdx = 0; tIdx < tcs.length; tIdx++) {
+      const tc = tcs[tIdx];
+      const name = tc?.name || 'unknown_tool';
+      const target = extractToolTargetLabel(name, tc?.argumentsJson);
+      const entry = { name, target, stepIndex: i, model: stepModel };
+      allToolEntries.push(entry);
+
+      let mList = toolEntriesByModel.get(stepModel);
+      if (!mList) {
+        mList = [];
+        toolEntriesByModel.set(stepModel, mList);
+      }
+      mList.push(entry);
+
+      if (name === 'invoke_subagent') {
+        let args = {};
+        try { args = JSON.parse(tc.argumentsJson || '{}'); } catch {}
+        let subId = null;
+        for (let look = 1; look <= tcs.length + 2 && i + look < steps.length; look++) {
+          const cand = steps[i + look];
+          const str = JSON.stringify(cand || '');
+          const m = str.match(UUID_RE);
+          if (m && m[0] !== cascadeId) {
+            subId = m[0];
+            break;
+          }
+        }
+        const dedupKey = subId || `step-${i}-${tIdx}`;
+        if (!seenSubIds.has(dedupKey)) {
+          seenSubIds.add(dedupKey);
+          discoveredSubagents.push({
+            conversationId: subId,
+            typeName: args.TypeName || 'subagent',
+            role: args.Role || args.TypeName || 'Subagent',
+            requestedModel: args.Model || 'inherit',
+            stepIndex: i
+          });
+        }
+      }
+    }
+  }
+
+  const toolCallsByModel = {};
+  for (const [mName, entries] of toolEntriesByModel.entries()) {
+    toolCallsByModel[mName] = buildToolCallsSummary(entries);
+  }
+  const toolCalls = {
+    ...buildToolCallsSummary(allToolEntries),
+    byModel: toolCallsByModel
+  };
+
+  // 4. Build per-model stats breakdown for the Per-Model dropdown
+  const modelStats = {};
+  for (const t of turns) {
+    const key = t.modelDisplayName || 'Default Model';
+    let ms = modelStats[key];
+    if (!ms) {
+      const lim = resolveModelLimitsFor(models, key, t.modelKey, t.responseModel);
+      ms = {
+        displayName: key,
+        shortName: t.modelShortName,
+        maxContextTokens: lim.maxContextTokens,
+        maxOutputTokens: lim.maxOutputTokens,
+        turnsCount: 0,
+        inputTokens: 0,
+        cacheReadTokens: 0,
+        outputTokens: 0,
+        thinkingTokens: 0,
+        responseTokens: 0,
+        totalProcessedTokens: 0,
+        cacheEfficiencyPct: '0.0',
+        latestTurn: null
+      };
+      modelStats[key] = ms;
+    }
+    ms.turnsCount += 1;
+    ms.inputTokens += t.inputTokens;
+    ms.cacheReadTokens += t.cacheReadTokens;
+    ms.outputTokens += t.outputTokens;
+    ms.thinkingTokens += t.thinkingTokens;
+    ms.responseTokens += t.responseTokens;
+    ms.totalProcessedTokens += t.inputTokens + t.cacheReadTokens + t.outputTokens;
+    ms.latestTurn = t;
+  }
+  for (const ms of Object.values(modelStats)) {
+    const denom = ms.inputTokens + ms.cacheReadTokens;
+    ms.cacheEfficiencyPct = denom > 0 ? ((ms.cacheReadTokens / denom) * 100).toFixed(1) : '0.0';
+  }
+
+  // 5. Enrich discovered subagents with quick live token stats (non-recursive)
+  const subagents = await Promise.all(discoveredSubagents.map(async (sub) => {
+    if (!sub.conversationId) return { ...sub, activeTokens: 0, totalTurns: 0, totalProcessedTokens: 0, modelDisplayName: sub.requestedModel, status: 'unknown' };
+    try {
+      const subTraj = await callLanguageServerRpc('GetCascadeTrajectory', { cascade_id: sub.conversationId });
+      const subTurns = subTraj.trajectory?.generatorMetadata || [];
+      let totalProc = 0;
+      let latestAct = 0;
+      let latestMod = sub.requestedModel;
+      for (const st of subTurns) {
+        const u = st.chatModel?.usage || {};
+        const inp = parseInt(u.inputTokens || '0', 10);
+        const cac = parseInt(u.cacheReadTokens || '0', 10);
+        const out = parseInt(u.outputTokens || '0', 10);
+        totalProc += inp + cac + out;
+        latestAct = inp + cac + out;
+        if (st.chatModel?.modelDisplayName) latestMod = st.chatModel.modelDisplayName;
+      }
+      const status = subTraj.status || (subTurns.length > 0 ? 'active' : 'starting');
+      return {
+        ...sub,
+        activeTokens: latestAct,
+        totalTurns: subTurns.length,
+        totalProcessedTokens: totalProc,
+        modelDisplayName: latestMod,
+        status
+      };
+    } catch {
+      return { ...sub, activeTokens: 0, totalTurns: 0, totalProcessedTokens: 0, modelDisplayName: sub.requestedModel, status: 'unavailable' };
+    }
+  }));
+
   return {
     cascadeId,
     timestamp: new Date().toISOString(),
@@ -492,6 +722,9 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
       maxContextTokens,
       maxOutputTokens
     },
+    modelStats,
+    toolCalls,
+    subagents,
     liveContext: {
       activeTokens: activeContextTokens,
       maxLimit: maxContextTokens,
