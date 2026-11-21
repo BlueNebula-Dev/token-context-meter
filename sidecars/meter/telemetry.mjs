@@ -8,7 +8,7 @@
 
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, statSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,19 +16,82 @@ import { join } from 'node:path';
 let cachedModels = null;
 let modelsCacheExpiry = 0;
 
+// Cache for language server credentials
+let cachedCredentials = null;
+let credentialsCacheExpiry = 0;
+
+/**
+ * Discovers active language_server credentials from ~/.gemini/antigravity/daemon/hub_*.json
+ */
+function discoverDaemonCredentials() {
+  try {
+    const daemonDir = join(homedir(), '.gemini', 'antigravity', 'daemon');
+    if (!existsSync(daemonDir)) return null;
+
+    const files = readdirSync(daemonDir)
+      .filter(f => f.startsWith('hub_') && f.endsWith('.json'))
+      .map(f => {
+        try {
+          return { name: f, mtime: statSync(join(daemonDir, f)).mtimeMs };
+        } catch {
+          return { name: f, mtime: 0 };
+        }
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+
+    for (const f of files.slice(0, 5)) {
+      try {
+        const content = JSON.parse(readFileSync(join(daemonDir, f.name), 'utf-8'));
+        if (content.httpPort && content.csrfToken) {
+          let isAlive = false;
+          try {
+            process.kill(content.pid, 0);
+            isAlive = true;
+          } catch {
+            isAlive = false;
+          }
+          if (isAlive) {
+            return {
+              address: `127.0.0.1:${content.httpPort}`,
+              csrfToken: content.csrfToken
+            };
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
 /**
  * Discovers the active language_server address and CSRF token.
- * Checks environment variables first; falls back to scanning running process flags.
+ * Checks environment variables first -> daemon metadata files -> running process flags.
  */
 export function getLanguageServerCredentials() {
+  const now = Date.now();
+  if (cachedCredentials && now < credentialsCacheExpiry) {
+    return cachedCredentials;
+  }
+
   let addr = process.env.ANTIGRAVITY_LS_ADDRESS || '';
   let csrf = process.env.ANTIGRAVITY_CSRF_TOKEN || '';
 
   if (addr && csrf) {
-    return { address: addr, csrfToken: csrf };
+    const creds = { address: addr, csrfToken: csrf };
+    cachedCredentials = creds;
+    credentialsCacheExpiry = now + 15000;
+    return creds;
   }
 
-  // Fallback: Discover from running process command line flags
+  // 1. Try reading the active daemon hub json file directly
+  const daemonCreds = discoverDaemonCredentials();
+  if (daemonCreds) {
+    cachedCredentials = daemonCreds;
+    credentialsCacheExpiry = now + 15000;
+    return daemonCreds;
+  }
+
+  // 2. Fallback: Discover from running process command line flags
   try {
     const isWindows = process.platform === 'win32';
     let output = '';
@@ -66,7 +129,10 @@ export function getLanguageServerCredentials() {
   if (!addr) addr = '127.0.0.1:51267';
   if (!csrf) csrf = process.env.ANTIGRAVITY_CSRF_TOKEN || '';
 
-  return { address: addr, csrfToken: csrf };
+  const creds = { address: addr, csrfToken: csrf };
+  cachedCredentials = creds;
+  credentialsCacheExpiry = now + 15000;
+  return creds;
 }
 
 /**
