@@ -2,7 +2,10 @@
   "mcpServers": {
     "token-context-meter": {
       "command": "node",
-      "args": ["C:/Users/Gian/.gemini/config/plugins/token-context-meter/mcp/server.mjs"]
+      "args": [
+        "-e",
+        "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),url=require('node:url');const candidates=[path.resolve('mcp/server.mjs'),path.join(os.homedir(),'.gemini','config','plugins','token-context-meter','mcp','server.mjs')];const target=candidates.find(p=>fs.existsSync(p));if(!target){console.error('Could not locate token-context-meter mcp/server.mjs');process.exit(1);}import(url.pathToFileURL(target).href);"
+      ]
     }
   }
 }

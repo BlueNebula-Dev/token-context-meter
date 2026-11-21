@@ -16,7 +16,7 @@ When the user asks for `/context` or inquires about current token usage, follow 
    - If available via MCP: call `get_token_context`.
    - If MCP is lazy-loaded or not yet initialized in the current turn, you can run the quick Node one-liner:
      ```bash
-     node -e "import('file:///C:/Users/Gian/.gemini/config/plugins/token-context-meter/sidecars/meter/telemetry.mjs').then(m => m.getConversationTokenTelemetry()).then(t => console.log(JSON.stringify(t, null, 2)))"
+     node -e "const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),url=require('node:url');const p=[path.resolve('sidecars/meter/telemetry.mjs'),path.join(os.homedir(),'.gemini','config','plugins','token-context-meter','sidecars','meter','telemetry.mjs')].find(fs.existsSync);import(url.pathToFileURL(p).href).then(m=>m.getConversationTokenTelemetry()).then(t=>console.log(JSON.stringify(t,null,2)))"
      ```
 
 2. **Present Metrics to the User**:

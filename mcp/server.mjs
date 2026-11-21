@@ -186,12 +186,13 @@ rl.on('line', async (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
 
+  let reqId = null;
   try {
     const req = JSON.parse(trimmed);
-    const id = req.id;
+    reqId = req.id !== undefined ? req.id : null;
 
     if (req.method === 'initialize') {
-      sendResponse(id, {
+      sendResponse(reqId, {
         protocolVersion: '2024-11-05',
         capabilities: {
           tools: {}
@@ -210,24 +211,28 @@ rl.on('line', async (line) => {
     }
 
     if (req.method === 'tools/list') {
-      sendResponse(id, { tools: TOOLS });
+      sendResponse(reqId, { tools: TOOLS });
       return;
     }
 
     if (req.method === 'tools/call') {
       const { name, arguments: toolArgs } = req.params || {};
-      const result = await handleToolCall(name, toolArgs);
-      sendResponse(id, result);
+      try {
+        const result = await handleToolCall(name, toolArgs);
+        sendResponse(reqId, result);
+      } catch (toolErr) {
+        sendError(reqId, -32603, `Tool execution error: ${toolErr.message}`);
+      }
       return;
     }
 
-    if (id !== undefined) {
-      sendError(id, -32601, `Method not found: ${req.method}`);
+    if (req.id !== undefined) {
+      sendError(reqId, -32601, `Method not found: ${req.method}`);
     }
   } catch (err) {
     console.error('MCP Server error:', err);
     try {
-      sendError(null, -32700, `Parse error: ${err.message}`);
+      sendError(reqId, -32700, `Parse error: ${err.message}`);
     } catch {}
   }
 });
