@@ -34,6 +34,19 @@
   let currentTelemetry = null;
   let pollInterval = null;
   let activeView = localStorage.getItem('token_meter_view') || 'prompt';
+  // Telemetry items the user has clicked to compact (persisted across polls/reloads)
+  let compactedKeys = new Set();
+  try {
+    compactedKeys = new Set(JSON.parse(localStorage.getItem('token_meter_compacted') || '[]'));
+  } catch {}
+  function saveCompacted() {
+    try {
+      localStorage.setItem('token_meter_compacted', JSON.stringify([...compactedKeys].slice(-200)));
+    } catch {}
+  }
+  function itemKey(kind, num) {
+    return `${currentTelemetry?.cascadeId || 'active'}:${kind}:${num}`;
+  }
   const POLL_MS = 2500;
 
   // DOM Elements
@@ -281,6 +294,8 @@
       const isLatest = p.promptNumber === latestPromptNum;
       const previewText = p.userPromptPreview ? `(${truncate(p.userPromptPreview, 24)})` : '';
       const cacheClass = getCacheBadgeClass(p.cacheEfficiencyPct);
+      const key = itemKey('prompt', p.promptNumber);
+      const isCompact = compactedKeys.has(key);
 
       let routingHtml = '';
       if (p.modelsUsedShort && p.modelsUsedShort.length > 0) {
@@ -290,10 +305,10 @@
       }
 
       return `
-        <div class="telemetry-item">
+        <div class="telemetry-item${isCompact ? ' compact' : ''}" data-key="${escapeHtml(key)}" role="button" tabindex="0" aria-expanded="${!isCompact}" title="Click to ${isCompact ? 'expand' : 'compact'}">
           <div class="item-top-row">
             <div class="item-title">
-              <span class="prompt-num">#${p.promptNumber}${isLatest ? ' (Current)' : ''}</span>
+              <span class="num-capsule${isLatest ? ' current' : ''}" title="${isLatest ? 'Current prompt' : `Prompt ${p.promptNumber}`}">${p.promptNumber}</span>
               ${previewText ? `<span class="prompt-preview" title="${escapeHtml(p.userPromptPreview)}">${escapeHtml(previewText)}</span>` : ''}
               <span class="calls-count">· ${p.llmCallsCount} call${p.llmCallsCount === 1 ? '' : 's'}</span>
             </div>
@@ -320,12 +335,14 @@
       const modelLabel = t.modelShortName || t.modelDisplayName || 'Flash';
       const modelFullName = t.modelDisplayName || t.modelId || 'Unknown Model';
       const cacheClass = getCacheBadgeClass(t.cacheEfficiencyPct);
+      const key = itemKey('step', t.turnNumber);
+      const isCompact = compactedKeys.has(key);
 
       return `
-        <div class="telemetry-item">
+        <div class="telemetry-item${isCompact ? ' compact' : ''}" data-key="${escapeHtml(key)}" role="button" tabindex="0" aria-expanded="${!isCompact}" title="Click to ${isCompact ? 'expand' : 'compact'}">
           <div class="item-top-row">
             <div class="item-title">
-              <span class="step-turn">#${t.turnNumber}</span>
+              <span class="num-capsule" title="Turn ${t.turnNumber}">${t.turnNumber}</span>
               <span class="step-indices">· Step ${escapeHtml(stepsStr)}</span>
               <span class="routing-pill ${getModelPillClass(modelLabel)}" title="${escapeHtml(modelFullName)}">${escapeHtml(modelLabel)}</span>
             </div>
@@ -338,6 +355,33 @@
         </div>
       `;
     }).join('');
+  }
+
+  // Click / keyboard toggle to compact individual telemetry items
+  function toggleItem(el) {
+    const key = el?.dataset?.key;
+    if (!key) return;
+    if (compactedKeys.has(key)) compactedKeys.delete(key);
+    else compactedKeys.add(key);
+    saveCompacted();
+    const isCompact = compactedKeys.has(key);
+    el.classList.toggle('compact', isCompact);
+    el.setAttribute('aria-expanded', String(!isCompact));
+    el.title = `Click to ${isCompact ? 'expand' : 'compact'}`;
+  }
+
+  if (telemetryList) {
+    telemetryList.addEventListener('click', (e) => {
+      if (window.getSelection && String(window.getSelection()).length) return;
+      toggleItem(e.target.closest('.telemetry-item'));
+    });
+    telemetryList.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const item = e.target.closest('.telemetry-item');
+      if (!item) return;
+      e.preventDefault();
+      toggleItem(item);
+    });
   }
 
   // View toggle button listeners
