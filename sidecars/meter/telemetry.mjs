@@ -529,6 +529,20 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
   const compactions = [];
   const sessionModelsSet = new Set();
   let prevPromptTokens = 0;
+  let prevTurnCompletedMs = null;
+  let prevTurnModelName = null;
+  let prevTurnModelShort = null;
+
+  function parseStepTimeMs(stepObj, preferEnd = false) {
+    const md = stepObj?.metadata;
+    if (!md) return null;
+    const raw = preferEnd
+      ? (md.completedAt || md.finishedGeneratingAt || md.createdAt)
+      : (md.createdAt || md.startedAt || md.completedAt);
+    if (!raw) return null;
+    const ms = Date.parse(raw);
+    return Number.isNaN(ms) ? null : ms;
+  }
 
   rawTurns.forEach((turn, idx) => {
     const chatModel = turn.chatModel || {};
@@ -548,6 +562,26 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
     const modelKey = usage.model || '';
     const modelId = responseModel || modelKey || modelDisplayName;
     const modelShortName = getCompactModelName(modelDisplayName, responseModel, modelKey);
+    const apiProvider = usage.apiProvider || '';
+
+    const sIndices = turn.stepIndices || [];
+    const firstStepIdx = sIndices.length ? sIndices[0] : -1;
+    const lastStepIdx = sIndices.length ? sIndices[sIndices.length - 1] : -1;
+    const createdAtMs = firstStepIdx >= 0 ? parseStepTimeMs(steps[firstStepIdx], false) : null;
+    const completedAtMs = lastStepIdx >= 0 ? (parseStepTimeMs(steps[lastStepIdx], true) || createdAtMs) : createdAtMs;
+    const gapSincePrevTurnMs = (createdAtMs && prevTurnCompletedMs)
+      ? Math.max(0, createdAtMs - prevTurnCompletedMs)
+      : null;
+
+    const modelSwitched = Boolean(prevTurnModelName && prevTurnModelName !== modelDisplayName);
+    let cacheStatus = 'initial';
+    if (idx > 0) {
+      if (cacheReadTokens > 0) {
+        cacheStatus = modelSwitched ? 'cross_model_hit' : 'warm_hit';
+      } else {
+        cacheStatus = modelSwitched ? 'model_switch_miss' : 'cold_miss';
+      }
+    }
 
     if (modelDisplayName && modelDisplayName !== 'Default Model') {
       sessionModelsSet.add(modelDisplayName);
@@ -557,7 +591,7 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
     if (prevPromptTokens > 8000 && promptTokens < prevPromptTokens * 0.7) {
       compactions.push({
         turnIndex: idx + 1,
-        stepIndices: turn.stepIndices || [],
+        stepIndices: sIndices,
         tokensBefore: prevPromptTokens,
         tokensAfter: promptTokens,
         tokensSaved: prevPromptTokens - promptTokens
@@ -573,10 +607,12 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
 
     const turnItem = {
       turnNumber: idx + 1,
-      stepIndices: turn.stepIndices || [],
+      stepIndices: sIndices,
       modelId,
       modelDisplayName,
       modelShortName,
+      prevModelShortName: prevTurnModelShort,
+      apiProvider,
       responseModel,
       modelKey,
       inputTokens,
@@ -586,12 +622,20 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
       responseTokens,
       promptTokens,
       totalTurnTokens,
-      cacheEfficiencyPct: promptTokens > 0 ? ((cacheReadTokens / promptTokens) * 100).toFixed(1) : '0.0'
+      cacheEfficiencyPct: promptTokens > 0 ? ((cacheReadTokens / promptTokens) * 100).toFixed(1) : '0.0',
+      createdAtMs,
+      completedAtMs,
+      gapSincePrevTurnMs,
+      cacheStatus
     };
     turns.push(turnItem);
 
+    if (completedAtMs) prevTurnCompletedMs = completedAtMs;
+    prevTurnModelName = modelDisplayName;
+    prevTurnModelShort = modelShortName;
+
     // Assign turn to corresponding user prompt group
-    const firstStep = turn.stepIndices && turn.stepIndices.length ? turn.stepIndices[0] : 0;
+    const firstStep = sIndices.length ? sIndices[0] : 0;
     let targetPromptIdx = 0;
     for (let i = 0; i < userPrompts.length; i++) {
       if (firstStep >= userPrompts[i].stepIndex) {
@@ -623,8 +667,67 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
     }
   }
 
-  // 2. Build grouped prompts array for "By Prompt" view
-  const prompts = promptGroups.map((pg) => {
+  // 2. Build grouped prompts array for "By Prompt" view (with chat-to-chat cache lifespan stats)
+  let prevPromptEndedMs = null;
+  let prevPromptLastModelName = null;
+  let prevPromptLastModelShort = null;
+
+  // Burst-resistant survival boundary tracker (only same-model prompt-to-prompt gaps >= 30s)
+  const MIN_NON_BURST_MS = 30 * 1000;
+  function makeLifespanBucket() {
+    return {
+      maxWarmGapMs: null,
+      minColdGapMs: null,
+      warmSamples: 0,
+      coldSamples: 0
+    };
+  }
+  const overallLifespan = makeLifespanBucket();
+  const lifespanByModel = {};
+
+  function recordLifespanSample(bucket, gapMs, isWarm) {
+    if (gapMs == null || gapMs < MIN_NON_BURST_MS) return;
+    if (isWarm) {
+      bucket.warmSamples += 1;
+      if (bucket.maxWarmGapMs === null || gapMs > bucket.maxWarmGapMs) {
+        bucket.maxWarmGapMs = gapMs;
+      }
+    } else {
+      bucket.coldSamples += 1;
+      if (bucket.minColdGapMs === null || gapMs < bucket.minColdGapMs) {
+        bucket.minColdGapMs = gapMs;
+      }
+    }
+  }
+
+  function finalizeLifespan(bucket) {
+    const sampleCount = bucket.warmSamples + bucket.coldSamples;
+    const hasWarm = bucket.maxWarmGapMs !== null;
+    const hasCold = bucket.minColdGapMs !== null;
+    let status = 'no_data';
+    let estimatedTtlMs = null;
+    if (hasWarm && hasCold && bucket.minColdGapMs > bucket.maxWarmGapMs) {
+      status = 'bracketed';
+      estimatedTtlMs = Math.round((bucket.maxWarmGapMs + bucket.minColdGapMs) / 2);
+    } else if (hasWarm) {
+      status = 'lower_bound';
+      estimatedTtlMs = bucket.maxWarmGapMs;
+    } else if (hasCold) {
+      status = 'upper_bound';
+      estimatedTtlMs = bucket.minColdGapMs;
+    }
+    return {
+      status,
+      sampleCount,
+      warmSamples: bucket.warmSamples,
+      coldSamples: bucket.coldSamples,
+      maxWarmGapMs: bucket.maxWarmGapMs,
+      minColdGapMs: bucket.minColdGapMs,
+      estimatedTtlMs
+    };
+  }
+
+  const prompts = promptGroups.map((pg, pgIdx) => {
     const pTurns = pg.turns;
     let sumInput = 0, sumCache = 0, sumThinking = 0, sumOutput = 0;
     const modelsUsedSet = [];
@@ -643,13 +746,48 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
       }
     });
 
-    const lastTurn = pTurns[pTurns.length - 1];
+    const firstTurn = pTurns[0] || null;
+    const lastTurn = pTurns[pTurns.length - 1] || null;
     const endingContext = lastTurn ? lastTurn.totalTurnTokens : (latestTurn ? latestTurn.totalTurnTokens : 0);
     const endingContextPct = maxContextTokens > 0 ? ((endingContext / maxContextTokens) * 100).toFixed(2) : '0.0';
     const totalPromptTokens = sumInput + sumCache;
 
-    const minStep = pTurns.length && pTurns[0].stepIndices?.length ? pTurns[0].stepIndices[0] : pg.userStepIndex;
+    const minStep = pTurns.length && firstTurn.stepIndices?.length ? firstTurn.stepIndices[0] : pg.userStepIndex;
     const maxStep = pTurns.length && lastTurn?.stepIndices?.length ? lastTurn.stepIndices[lastTurn.stepIndices.length - 1] : minStep;
+
+    const startedAtMs = firstTurn?.createdAtMs || parseStepTimeMs(steps[pg.userStepIndex], false);
+    const endedAtMs = lastTurn?.completedAtMs || startedAtMs;
+    const gapSincePrevPromptMs = (pgIdx > 0 && startedAtMs && prevPromptEndedMs)
+      ? Math.max(0, startedAtMs - prevPromptEndedMs)
+      : null;
+
+    const firstModelName = firstTurn?.modelDisplayName || null;
+    const firstModelShort = firstTurn?.modelShortName || null;
+    const promptModelSwitched = Boolean(prevPromptLastModelName && firstModelName && prevPromptLastModelName !== firstModelName);
+    const firstTurnHadCache = Boolean(firstTurn && firstTurn.cacheReadTokens > 0);
+
+    let promptCacheStatus = 'initial';
+    if (pgIdx > 0 && firstTurn) {
+      if (firstTurnHadCache) {
+        promptCacheStatus = promptModelSwitched ? 'cross_model_hit' : 'warm_hit';
+      } else {
+        promptCacheStatus = promptModelSwitched ? 'model_switch_miss' : 'cold_miss';
+      }
+
+      // Record chat-to-chat survival boundary ONLY for same-model gaps >= 30s (ignores short bursts & tool loops)
+      if (!promptModelSwitched && gapSincePrevPromptMs !== null && firstModelName) {
+        recordLifespanSample(overallLifespan, gapSincePrevPromptMs, firstTurnHadCache);
+        if (!lifespanByModel[firstModelName]) lifespanByModel[firstModelName] = makeLifespanBucket();
+        recordLifespanSample(lifespanByModel[firstModelName], gapSincePrevPromptMs, firstTurnHadCache);
+      }
+    }
+
+    const prevShortSnapshot = prevPromptLastModelShort;
+    if (endedAtMs) prevPromptEndedMs = endedAtMs;
+    if (lastTurn?.modelDisplayName) {
+      prevPromptLastModelName = lastTurn.modelDisplayName;
+      prevPromptLastModelShort = lastTurn.modelShortName;
+    }
 
     return {
       promptNumber: pg.promptNumber,
@@ -666,9 +804,29 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
       cacheEfficiencyPct: totalPromptTokens > 0 ? ((sumCache / totalPromptTokens) * 100).toFixed(1) : '0.0',
       endingContext,
       endingContextPct,
-      stepRange: pTurns.length ? `${minStep} → ${maxStep}` : `Step ${pg.userStepIndex}`
+      stepRange: pTurns.length ? `${minStep} → ${maxStep}` : `Step ${pg.userStepIndex}`,
+      startedAtMs,
+      endedAtMs,
+      gapSincePrevPromptMs,
+      promptCacheStatus,
+      cachedModelShort: firstModelShort,
+      prevPromptModelShort: prevShortSnapshot
     };
   });
+
+  const finalizedLifespanByModel = {};
+  for (const [mName, b] of Object.entries(lifespanByModel)) {
+    finalizedLifespanByModel[mName] = finalizeLifespan(b);
+  }
+  const cacheLifespan = {
+    overall: finalizeLifespan(overallLifespan),
+    byModel: finalizedLifespanByModel,
+    lastChatCompletedAtMs: latestTurn?.completedAtMs || null,
+    warmModelDisplayName: latestTurn?.modelDisplayName || activeModelDisplayName,
+    warmModelShortName: latestTurn?.modelShortName || getCompactModelName(activeModelDisplayName),
+    lastTurnHadCache: Boolean(latestTurn && latestTurn.cacheReadTokens > 0),
+    minSampleGapMs: MIN_NON_BURST_MS
+  };
 
   // Active Context calculation
   const activeContextTokens = latestTurn ? latestTurn.totalTurnTokens : 0;
@@ -842,6 +1000,7 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
     modelStats,
     toolCalls,
     subagents,
+    cacheLifespan,
     liveContext: {
       activeTokens: activeContextTokens,
       maxLimit: maxContextTokens,

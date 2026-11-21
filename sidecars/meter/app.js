@@ -140,6 +140,10 @@
   const turnCachePct = document.getElementById('turnCachePct');
   const turnNewInputVal = document.getElementById('turnNewInputVal');
   const turnNewInputPct = document.getElementById('turnNewInputPct');
+  const cacheLifespanStrip = document.getElementById('cacheLifespanStrip');
+  const lastChatAgoVal = document.getElementById('lastChatAgoVal');
+  const warmModelPill = document.getElementById('warmModelPill');
+  const cacheLifespanStat = document.getElementById('cacheLifespanStat');
 
   const turnOutputTotalBadge = document.getElementById('turnOutputTotalBadge');
   const genOutputLimitVal = document.getElementById('genOutputLimitVal');
@@ -442,6 +446,7 @@
     if (turnCachePct) turnCachePct.textContent = pctStr(latest.cacheReadTokens || 0, promptTotal);
     turnNewInputVal.textContent = formatNum(latest.inputTokens);
     if (turnNewInputPct) turnNewInputPct.textContent = pctStr(latest.inputTokens || 0, promptTotal);
+    renderCacheLifespanStrip();
 
     // Generation Output Breakdown + 3-Level Tool Calls Tree
     const outTotal = latest.outputTokens || 0;
@@ -564,6 +569,92 @@
         </div>
       `;
     }).join('');
+  }
+
+  function formatDurationShort(ms) {
+    if (ms == null || ms < 0) return '—';
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return `${sec}s`;
+    const mins = Math.floor(sec / 60);
+    const remSec = sec % 60;
+    if (mins < 60) return remSec > 0 ? `${mins}m ${remSec}s` : `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    const remMin = mins % 60;
+    return remMin > 0 ? `${hrs}h ${remMin}m` : `${hrs}h`;
+  }
+
+  function formatCacheStatusLine(gapMs, status, modelShort, prevModelShort) {
+    const gapPart = gapMs != null ? `${formatDurationShort(gapMs)} gap · ` : '';
+    const mod = modelShort || 'Model';
+    if (status === 'initial') return `Initial (${mod})`;
+    if (status === 'warm_hit') return `${gapPart}Warm Hit (${mod})`;
+    if (status === 'cross_model_hit') return `${gapPart}Warm Hit (${prevModelShort || '?'} → ${mod})`;
+    if (status === 'model_switch_miss') return `${gapPart}Cold · Switch (${prevModelShort || '?'} → ${mod})`;
+    if (status === 'cold_miss') return `${gapPart}Cold Miss (${mod})`;
+    return `${gapPart}${mod}`;
+  }
+
+  function renderCacheLifespanStrip() {
+    if (!currentTelemetry || !cacheLifespanStrip) return;
+    const cl = currentTelemetry.cacheLifespan;
+    if (!cl) return;
+
+    const modelKey = selectedModel !== 'all' ? selectedModel : cl.warmModelDisplayName;
+    const modelStat = modelKey ? cl.byModel?.[modelKey] : null;
+    const stat = (modelStat && modelStat.sampleCount > 0) ? modelStat : cl.overall;
+
+    const warmName = selectedModel !== 'all'
+      ? (currentTelemetry.modelStats?.[selectedModel]?.shortName || selectedModel)
+      : (cl.warmModelShortName || '—');
+
+    if (warmModelPill) {
+      warmModelPill.textContent = warmName;
+      warmModelPill.className = `routing-pill ${getModelPillClass(warmName)}`;
+      warmModelPill.title = `Warm cache model: ${modelKey || warmName}`;
+    }
+
+    const lastCompletedMs = selectedModel !== 'all'
+      ? (currentTelemetry.modelStats?.[selectedModel]?.latestTurn?.completedAtMs || cl.lastChatCompletedAtMs)
+      : cl.lastChatCompletedAtMs;
+    const elapsedMs = lastCompletedMs ? Math.max(0, Date.now() - lastCompletedMs) : null;
+
+    if (lastChatAgoVal) {
+      lastChatAgoVal.textContent = elapsedMs != null ? `Last chat: ${formatDurationShort(elapsedMs)} ago` : 'Last chat: —';
+    }
+
+    if (!cacheLifespanStat) return;
+    cacheLifespanStat.classList.remove('warm', 'expiring', 'cold');
+
+    if (!stat || stat.status === 'no_data') {
+      cacheLifespanStat.textContent = 'No lifespan data yet';
+      cacheLifespanStrip.title = 'Waiting for same-model chat-to-chat gaps ≥ 30s (ignores short bursts & tool loops)';
+      return;
+    }
+
+    const parts = [];
+    if (stat.maxWarmGapMs != null) parts.push(`Max warm gap: ${formatDurationShort(stat.maxWarmGapMs)}`);
+    if (stat.minColdGapMs != null) parts.push(`Min cold gap: ${formatDurationShort(stat.minColdGapMs)}`);
+    parts.push(`Chat-to-chat samples (≥30s): ${stat.sampleCount}`);
+    cacheLifespanStrip.title = parts.join('\n');
+
+    if (stat.status === 'bracketed') {
+      cacheLifespanStat.textContent = `TTL ~${formatDurationShort(stat.maxWarmGapMs)}–${formatDurationShort(stat.minColdGapMs)}`;
+      if (elapsedMs != null) {
+        if (elapsedMs >= stat.minColdGapMs) cacheLifespanStat.classList.add('cold');
+        else if (elapsedMs >= stat.maxWarmGapMs) cacheLifespanStat.classList.add('expiring');
+        else cacheLifespanStat.classList.add('warm');
+      }
+    } else if (stat.status === 'lower_bound') {
+      cacheLifespanStat.textContent = `TTL ≥ ${formatDurationShort(stat.maxWarmGapMs)} (${stat.sampleCount})`;
+      if (elapsedMs != null && elapsedMs <= stat.maxWarmGapMs) {
+        cacheLifespanStat.classList.add('warm');
+      }
+    } else if (stat.status === 'upper_bound') {
+      cacheLifespanStat.textContent = `TTL < ${formatDurationShort(stat.minColdGapMs)} (${stat.sampleCount})`;
+      if (elapsedMs != null && elapsedMs >= stat.minColdGapMs) {
+        cacheLifespanStat.classList.add('cold');
+      }
+    }
   }
 
   function formatCountdown(ms) {
@@ -798,11 +889,14 @@
       const callsText = `${p.llmCallsCount} call${p.llmCallsCount === 1 ? '' : 's'}`;
       const showAnyField = showChatPrimary || Boolean(routingHtml) || telemetryFields.calls || telemetryFields.cache;
 
+      const cacheLine = formatCacheStatusLine(p.gapSincePrevPromptMs, p.promptCacheStatus, p.cachedModelShort || p.modelsUsedShort?.[0], p.prevPromptModelShort);
+      const cacheDot = (p.promptCacheStatus === 'warm_hit' || p.promptCacheStatus === 'cross_model_hit') ? 'dot-cache' : 'dot-total';
       const ledgerHtml = renderLedgerRows([
         { dot: 'dot-input', label: 'New Input', value: formatNum(p.newInput) },
         { dot: 'dot-cache', label: 'Cache Read', value: formatNum(p.cacheRead), valClass: 'val-cache' },
         { dot: 'dot-think', label: 'Thinking', value: formatNum(p.thinking), valClass: 'val-think' },
         { dot: 'dot-output', label: 'Output', value: formatNum(p.output) },
+        { dot: cacheDot, label: 'Cache', value: cacheLine },
         { dot: 'dot-total', label: 'Ending Context', value: `${formatCompactNum(p.endingContext)} (${p.endingContextPct}%)`, valClass: 'val-strong' }
       ]);
 
@@ -841,11 +935,14 @@
       const isCompact = isItemCompact(key);
       const showAnyField = telemetryFields.chat || telemetryFields.model || telemetryFields.cache;
 
+      const stepCacheLine = formatCacheStatusLine(t.gapSincePrevTurnMs, t.cacheStatus, modelLabel, t.prevModelShortName);
+      const stepCacheDot = (t.cacheStatus === 'warm_hit' || t.cacheStatus === 'cross_model_hit') ? 'dot-cache' : 'dot-total';
       const ledgerHtml = renderLedgerRows([
         { dot: 'dot-input', label: 'New Input', value: formatNum(t.inputTokens) },
         { dot: 'dot-cache', label: 'Cache Read', value: formatNum(t.cacheReadTokens), valClass: 'val-cache' },
         { dot: 'dot-think', label: 'Thinking', value: formatNum(t.thinkingTokens), valClass: 'val-think' },
         { dot: 'dot-output', label: 'Output', value: formatNum(t.outputTokens) },
+        { dot: stepCacheDot, label: 'Cache', value: stepCacheLine },
         { dot: 'dot-total', label: 'Total Turn', value: formatNum(t.totalTurnTokens), valClass: 'val-strong' }
       ]);
 
@@ -1296,6 +1393,11 @@
   setInterval(() => {
     if (activeTab !== 'global') fetchTelemetry();
   }, POLL_MS);
+
+  // Tick live "Last chat: X ago" & lifespan status every 1s
+  setInterval(() => {
+    if (activeTab === 'session' && currentTelemetry) renderCacheLifespanStrip();
+  }, 1000);
 
   // Background quota-cycle monitor (checks every 60s so 100% auto-snapshots fire even while on Session tab)
   setInterval(() => {

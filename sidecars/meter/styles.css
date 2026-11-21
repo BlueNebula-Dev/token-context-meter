@@ -835,6 +835,34 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Live Cache Lifespan Strip inside Active Turn */
+.cache-lifespan-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--cx-fill);
+  font-size: 11px;
+}
+.cache-lifespan-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cache-lifespan-stat {
+  color: var(--cx-fg-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cache-lifespan-stat.warm { color: var(--tm-ok); }
+.cache-lifespan-stat.expiring { color: var(--tm-warn); }
+.cache-lifespan-stat.cold { color: var(--tm-crit); }
+
 
 /* ---------- Telemetry ---------- */
 .view-toggle {
