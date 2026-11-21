@@ -215,7 +215,7 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
   const traj = trajResp.trajectory || {};
   const steps = traj.steps || [];
   const rawTurns = traj.generatorMetadata || [];
-  const models = modelsResp.response?.models || {};
+  const models = modelsResp.response?.models || modelsResp || {};
 
   // 1. Identify user input boundaries from trajectory steps
   const userPrompts = [];
@@ -341,7 +341,8 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
 
   for (const [key, modelDef] of Object.entries(models)) {
     if (modelDef.displayName === activeModelDisplayName ||
-        (latestTurn?.responseModel && key.includes(latestTurn.responseModel))) {
+        (latestTurn?.modelKey && modelDef.model === latestTurn.modelKey) ||
+        (latestTurn?.responseModel && (key === latestTurn.responseModel || key.includes(latestTurn.responseModel)))) {
       maxContextTokens = modelDef.maxTokens || maxContextTokens;
       maxOutputTokens = modelDef.maxOutputTokens || maxOutputTokens;
       activeModelDisplayName = modelDef.displayName || activeModelDisplayName;
