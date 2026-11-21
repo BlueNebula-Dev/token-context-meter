@@ -47,6 +47,30 @@
   function itemKey(kind, num) {
     return `${currentTelemetry?.cascadeId || 'active'}:${kind}:${num}`;
   }
+
+  // Persisted UI preferences: visible sections, compacted sections, telemetry fields
+  const DEFAULT_SECTIONS = { windowUtil: true, activeTurn: true, genOutput: true, sessionTotals: true, telemetry: true };
+  const DEFAULT_SECTION_COMPACT = { windowUtil: false, activeTurn: false, genOutput: false, sessionTotals: false, telemetry: false };
+  const DEFAULT_TELEMETRY_FIELDS = { model: true, chat: true, calls: true, cache: true };
+
+  function loadJsonPref(key, defaults) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) || 'null');
+      return parsed && typeof parsed === 'object' ? { ...defaults, ...parsed } : { ...defaults };
+    } catch {
+      return { ...defaults };
+    }
+  }
+  function saveJsonPref(key, obj) {
+    try {
+      localStorage.setItem(key, JSON.stringify(obj));
+    } catch {}
+  }
+
+  const sectionVisibility = loadJsonPref('token_meter_sections', DEFAULT_SECTIONS);
+  const sectionCompact = loadJsonPref('token_meter_section_compact', DEFAULT_SECTION_COMPACT);
+  const telemetryFields = loadJsonPref('token_meter_telemetry_fields', DEFAULT_TELEMETRY_FIELDS);
+
   const POLL_MS = 2500;
 
   // DOM Elements
@@ -55,6 +79,17 @@
   const refreshBtn = document.getElementById('refreshBtn');
   const copyMarkdownBtn = document.getElementById('copyMarkdownBtn');
   const cascadeIdBadge = document.getElementById('cascadeIdBadge');
+
+  const headerMenuBtn = document.getElementById('headerMenuBtn');
+  const headerMenu = document.getElementById('headerMenu');
+  const telemetryMenuBtn = document.getElementById('telemetryMenuBtn');
+  const telemetryMenu = document.getElementById('telemetryMenu');
+  const telemetryHeaderToggle = document.getElementById('telemetryHeaderToggle');
+
+  const windowUtilCompactVal = document.getElementById('windowUtilCompactVal');
+  const activeTurnCompactVal = document.getElementById('activeTurnCompactVal');
+  const sessionCompactVal = document.getElementById('sessionCompactVal');
+  const telemetryCompactVal = document.getElementById('telemetryCompactVal');
 
   const viewPromptBtn = document.getElementById('viewPromptBtn');
   const viewStepBtn = document.getElementById('viewStepBtn');
@@ -220,6 +255,7 @@
     activeTokensVal.title = `Active Context: ${formatNum(ctx.activeTokens)} / ${formatNum(ctx.maxLimit)} tokens`;
     remainingTokensVal.textContent = `${formatNum(ctx.remainingTokens)} remaining`;
     remainingTokensVal.title = `${ctx.remainingPct || 0}% remaining capacity`;
+    if (windowUtilCompactVal) windowUtilCompactVal.textContent = `${pct.toFixed(1)}% used`;
 
     // Compaction Alert
     if (ctx.compactionCount > 0) {
@@ -236,6 +272,7 @@
     turnPromptTotalVal.textContent = formatNum(latest.promptTokens);
     turnCacheReadVal.textContent = formatNum(latest.cacheReadTokens);
     turnNewInputVal.textContent = formatNum(latest.inputTokens);
+    if (activeTurnCompactVal) activeTurnCompactVal.textContent = formatCompactNum(latest.promptTokens);
 
     turnOutputTotalBadge.textContent = formatNum(latest.outputTokens);
     turnThinkingVal.textContent = formatNum(latest.thinkingTokens);
@@ -245,6 +282,7 @@
     totalTurnsBadge.textContent = `${cum.totalTurns || 0} Turns`;
     sessionProcessedVal.textContent = formatNum(cum.totalProcessedTokens);
     sessionCacheSavingsVal.textContent = `${cum.overallCacheSavingsPct || 0}% Re-use Rate`;
+    if (sessionCompactVal) sessionCompactVal.textContent = formatCompactNum(cum.totalProcessedTokens);
 
     sessionInputTotal.textContent = formatCompactNum(cum.inputTokens);
     sessionInputTotal.title = `${formatNum(cum.inputTokens)} total input tokens`;
@@ -275,9 +313,11 @@
 
     if (activeView === 'prompt') {
       const prompts = currentTelemetry.recentPrompts || currentTelemetry.prompts || [];
+      if (telemetryCompactVal) telemetryCompactVal.textContent = `· ${prompts.length} prompt${prompts.length === 1 ? '' : 's'}`;
       renderPromptList(prompts);
     } else {
       const turns = currentTelemetry.recentTurns || currentTelemetry.turns || [];
+      if (telemetryCompactVal) telemetryCompactVal.textContent = `· ${turns.length} step${turns.length === 1 ? '' : 's'}`;
       renderStepList(turns);
     }
   }
@@ -292,13 +332,13 @@
 
     telemetryList.innerHTML = prompts.map(p => {
       const isLatest = p.promptNumber === latestPromptNum;
-      const previewText = p.userPromptPreview ? `(${truncate(p.userPromptPreview, 24)})` : '';
+      const previewText = p.userPromptPreview ? truncate(p.userPromptPreview, 26) : '';
       const cacheClass = getCacheBadgeClass(p.cacheEfficiencyPct);
       const key = itemKey('prompt', p.promptNumber);
       const isCompact = compactedKeys.has(key);
 
       let routingHtml = '';
-      if (p.modelsUsedShort && p.modelsUsedShort.length > 0) {
+      if (telemetryFields.model && p.modelsUsedShort && p.modelsUsedShort.length > 0) {
         routingHtml = p.modelsUsedShort.map(m =>
           `<span class="routing-pill ${getModelPillClass(m)}" title="${escapeHtml(m)}">${escapeHtml(m)}</span>`
         ).join('<span class="routing-arrow">→</span>');
@@ -309,10 +349,10 @@
           <div class="item-top-row">
             <div class="item-title">
               <span class="num-capsule${isLatest ? ' current' : ''}" title="${isLatest ? 'Current prompt' : `Prompt ${p.promptNumber}`}">${p.promptNumber}</span>
-              ${previewText ? `<span class="prompt-preview" title="${escapeHtml(p.userPromptPreview)}">${escapeHtml(previewText)}</span>` : ''}
-              <span class="calls-count">· ${p.llmCallsCount} call${p.llmCallsCount === 1 ? '' : 's'}</span>
+              ${telemetryFields.chat && previewText ? `<span class="prompt-preview" title="${escapeHtml(p.userPromptPreview)}">${escapeHtml(previewText)}</span>` : ''}
+              ${telemetryFields.calls ? `<span class="calls-count">· ${p.llmCallsCount} call${p.llmCallsCount === 1 ? '' : 's'}</span>` : ''}
             </div>
-            <span class="item-cache-badge ${cacheClass}">${p.cacheEfficiencyPct}% cache</span>
+            ${telemetryFields.cache ? `<span class="item-cache-badge ${cacheClass}">${p.cacheEfficiencyPct}% cache</span>` : ''}
           </div>
           ${routingHtml ? `<div class="item-routing-row">${routingHtml}</div>` : ''}
           <div class="item-bottom-row">
@@ -343,10 +383,10 @@
           <div class="item-top-row">
             <div class="item-title">
               <span class="num-capsule" title="Turn ${t.turnNumber}">${t.turnNumber}</span>
-              <span class="step-indices">· Step ${escapeHtml(stepsStr)}</span>
-              <span class="routing-pill ${getModelPillClass(modelLabel)}" title="${escapeHtml(modelFullName)}">${escapeHtml(modelLabel)}</span>
+              ${telemetryFields.chat ? `<span class="step-indices">· Step ${escapeHtml(stepsStr)}</span>` : ''}
+              ${telemetryFields.model ? `<span class="routing-pill ${getModelPillClass(modelLabel)}" title="${escapeHtml(modelFullName)}">${escapeHtml(modelLabel)}</span>` : ''}
             </div>
-            <span class="item-cache-badge ${cacheClass}">${t.cacheEfficiencyPct}% cache</span>
+            ${telemetryFields.cache ? `<span class="item-cache-badge ${cacheClass}">${t.cacheEfficiencyPct}% cache</span>` : ''}
           </div>
           <div class="item-bottom-row">
             <span class="item-breakdown">In: ${formatCompactNum(t.inputTokens)} · Cache: ${formatCompactNum(t.cacheReadTokens)} · Think: ${formatCompactNum(t.thinkingTokens)} · Out: ${formatCompactNum(t.outputTokens)}</span>
@@ -356,6 +396,108 @@
       `;
     }).join('');
   }
+
+  // Apply persisted section visibility, section compact states & checkbox states
+  function applySectionStates() {
+    document.querySelectorAll('[data-section]').forEach((sec) => {
+      const key = sec.dataset.section;
+      const visible = sectionVisibility[key] !== false;
+      const compact = Boolean(sectionCompact[key]);
+      sec.classList.toggle('hidden', !visible);
+      sec.classList.toggle('compact', compact);
+      if (sec.classList.contains('compactable-section')) {
+        sec.setAttribute('aria-expanded', String(!compact));
+        sec.title = `Click to ${compact ? 'expand' : 'compact'}`;
+      }
+    });
+    if (telemetryHeaderToggle) {
+      const compact = Boolean(sectionCompact.telemetry);
+      telemetryHeaderToggle.setAttribute('aria-expanded', String(!compact));
+      telemetryHeaderToggle.title = `Click to ${compact ? 'expand' : 'compact'} Telemetry`;
+    }
+    document.querySelectorAll('[data-section-toggle]').forEach((cb) => {
+      cb.checked = sectionVisibility[cb.dataset.sectionToggle] !== false;
+    });
+    document.querySelectorAll('[data-field-toggle]').forEach((cb) => {
+      cb.checked = telemetryFields[cb.dataset.fieldToggle] !== false;
+    });
+  }
+
+  function toggleSectionCompact(key) {
+    if (!key) return;
+    sectionCompact[key] = !sectionCompact[key];
+    saveJsonPref('token_meter_section_compact', sectionCompact);
+    applySectionStates();
+  }
+
+  // Click / keyboard to compact Window Util, Active Turn, Gen Output, Session Totals
+  document.querySelectorAll('.compactable-section').forEach((sec) => {
+    sec.addEventListener('click', (e) => {
+      if (window.getSelection && String(window.getSelection()).length) return;
+      if (e.target.closest('button, input, label, .popover-menu')) return;
+      toggleSectionCompact(sec.dataset.section);
+    });
+    sec.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target !== sec) return;
+      e.preventDefault();
+      toggleSectionCompact(sec.dataset.section);
+    });
+  });
+
+  if (telemetryHeaderToggle) {
+    telemetryHeaderToggle.addEventListener('click', () => {
+      toggleSectionCompact('telemetry');
+    });
+  }
+
+  // Popover menus (⋮) in header and telemetry
+  function closeAllMenus() {
+    if (headerMenu) headerMenu.classList.remove('open');
+    if (headerMenuBtn) headerMenuBtn.setAttribute('aria-expanded', 'false');
+    if (telemetryMenu) telemetryMenu.classList.remove('open');
+    if (telemetryMenuBtn) telemetryMenuBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function bindPopoverMenu(btn, menu) {
+    if (!btn || !menu) return;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const willOpen = !menu.classList.contains('open');
+      closeAllMenus();
+      if (willOpen) {
+        menu.classList.add('open');
+        btn.setAttribute('aria-expanded', 'true');
+      }
+    });
+    menu.addEventListener('click', (e) => e.stopPropagation());
+  }
+
+  bindPopoverMenu(headerMenuBtn, headerMenu);
+  bindPopoverMenu(telemetryMenuBtn, telemetryMenu);
+
+  document.addEventListener('click', closeAllMenus);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeAllMenus();
+  });
+
+  document.querySelectorAll('[data-section-toggle]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      sectionVisibility[cb.dataset.sectionToggle] = cb.checked;
+      saveJsonPref('token_meter_sections', sectionVisibility);
+      applySectionStates();
+    });
+  });
+
+  document.querySelectorAll('[data-field-toggle]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      telemetryFields[cb.dataset.fieldToggle] = cb.checked;
+      saveJsonPref('token_meter_telemetry_fields', telemetryFields);
+      renderTelemetryList();
+    });
+  });
+
+  applySectionStates();
 
   // Click / keyboard toggle to compact individual telemetry items
   function toggleItem(el) {

@@ -11,7 +11,7 @@
 </head>
 <body>
   <div class="meter-container">
-    <!-- Editorial Top Bar -->
+    <!-- Top Bar -->
     <header class="header">
       <div class="header-left">
         <div class="header-title">Context Meter</div>
@@ -30,118 +30,175 @@
             <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
           </svg>
         </button>
+        <div class="menu-anchor">
+          <button class="icon-btn" id="headerMenuBtn" title="Show / hide sections" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+              <circle cx="8" cy="3" r="1.3"/>
+              <circle cx="8" cy="8" r="1.3"/>
+              <circle cx="8" cy="13" r="1.3"/>
+            </svg>
+          </button>
+          <div class="popover-menu" id="headerMenu" role="menu" aria-label="Visible sections">
+            <div class="popover-title">Sections</div>
+            <label class="popover-item"><input type="checkbox" data-section-toggle="windowUtil" checked><span>Window Util</span></label>
+            <label class="popover-item"><input type="checkbox" data-section-toggle="activeTurn" checked><span>Active Turn</span></label>
+            <label class="popover-item"><input type="checkbox" data-section-toggle="genOutput" checked><span>Gen Output</span></label>
+            <label class="popover-item"><input type="checkbox" data-section-toggle="sessionTotals" checked><span>Session Total</span></label>
+            <label class="popover-item"><input type="checkbox" data-section-toggle="telemetry" checked><span>Telemetry</span></label>
+          </div>
+        </div>
       </div>
     </header>
 
     <!-- Main Scrollable Ledger -->
     <main class="main-content custom-scrollbar">
 
-      <!-- Hero Capacity Headline (Cardless) -->
-      <section class="section-block">
+      <!-- Window Utilization -->
+      <section class="section-block compactable-section" id="secWindowUtil" data-section="windowUtil" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
         <div class="hero-top-row font-mono">
-          <span class="section-label">WINDOW UTILIZATION</span>
-          <span class="health-status-text" id="healthBadge">Optimal Status</span>
+          <span class="section-label">Window Utilization</span>
+          <span class="section-summary-right">
+            <span class="compact-inline-val" id="windowUtilCompactVal">0.0% used</span>
+            <span class="health-status-text" id="healthBadge">Optimal Status</span>
+          </span>
         </div>
 
-        <div class="hero-metric-row font-mono">
-          <span class="hero-percent" id="contextPctValue">0.0%</span>
-          <span class="hero-sublabel">used</span>
-        </div>
+        <div class="section-body">
+          <div class="hero-metric-row font-mono">
+            <span class="hero-percent" id="contextPctValue">0.0%</span>
+            <span class="hero-sublabel">used</span>
+          </div>
 
-        <div class="bar-track">
-          <div class="bar-fill" id="contextProgressBar" style="width: 0%"></div>
-        </div>
+          <div class="bar-track">
+            <div class="bar-fill" id="contextProgressBar" style="width: 0%"></div>
+          </div>
 
-        <div class="hero-tokens-row font-mono">
-          <span id="activeTokensVal">0 active</span>
-          <span id="remainingTokensVal">0 remaining</span>
-        </div>
+          <div class="hero-tokens-row font-mono">
+            <span id="activeTokensVal">0 active</span>
+            <span id="remainingTokensVal">0 remaining</span>
+          </div>
 
-        <div class="badges-row font-mono">
-          <span class="badge model-badge" id="modelNameBadge">Gemini 3.8 Flash</span>
-          <span class="badge multi-model-badge" id="multiModelBadge" style="display: none;">2 Models</span>
+          <div class="badges-row font-mono">
+            <span class="badge model-badge" id="modelNameBadge">Gemini 3.8 Flash</span>
+            <span class="badge multi-model-badge" id="multiModelBadge" style="display: none;">2 Models</span>
+          </div>
+
+          <!-- Compaction Alert -->
+          <div class="compaction-alert" id="compactionAlert" style="display: none;">
+            <div class="compaction-title font-mono" id="compactionTitle">Context Compaction Active</div>
+            <div class="compaction-desc" id="compactionDesc">History checkpoints summarized earlier turns.</div>
+          </div>
         </div>
       </section>
 
-      <!-- Compaction Alert (Cardless) -->
-      <div class="compaction-alert" id="compactionAlert" style="display: none;">
-        <div class="compaction-title font-mono" id="compactionTitle">Context Compaction Active</div>
-        <div class="compaction-desc" id="compactionDesc">History checkpoints summarized earlier turns.</div>
-      </div>
-
-      <div class="hairline-divider"></div>
-
-      <!-- Active Turn Breakdown (Editorial Key-Value) -->
-      <section class="section-block">
+      <!-- Active Turn Breakdown -->
+      <section class="section-block compactable-section" id="secActiveTurn" data-section="activeTurn" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
         <div class="section-header-row">
           <span class="section-label">Active Turn</span>
-          <span class="cache-rate font-mono" id="cacheHitBadge">0.0% Cached</span>
+          <span class="section-summary-right font-mono">
+            <span class="compact-inline-val" id="activeTurnCompactVal">0</span>
+            <span class="cache-rate" id="cacheHitBadge">0.0% Cached</span>
+          </span>
         </div>
 
-        <div class="ledger-list font-mono">
-          <div class="ledger-row primary-row">
-            <span class="ledger-key">Total Prompt Tokens</span>
-            <span class="ledger-val bold-white" id="turnPromptTotalVal">0</span>
-          </div>
-          <div class="ledger-row indent-row">
-            <span class="ledger-key-sub">Cache Read</span>
-            <span class="ledger-val cache-green" id="turnCacheReadVal">0</span>
-          </div>
-          <div class="ledger-row indent-row">
-            <span class="ledger-key-sub">New Input</span>
-            <span class="ledger-val neutral-val" id="turnNewInputVal">0</span>
-          </div>
-
-          <div class="ledger-row primary-row pt-separator">
-            <span class="ledger-key">Generation Output</span>
-            <span class="ledger-val bold-purple" id="turnOutputTotalBadge">0</span>
-          </div>
-          <div class="ledger-row indent-row">
-            <span class="ledger-key-sub">Thinking</span>
-            <span class="ledger-val thinking-purple" id="turnThinkingVal">0</span>
-          </div>
-          <div class="ledger-row indent-row">
-            <span class="ledger-key-sub">Response & Tools</span>
-            <span class="ledger-val neutral-val" id="turnResponseVal">0</span>
+        <div class="section-body">
+          <div class="ledger-list font-mono">
+            <div class="ledger-row primary-row">
+              <span class="ledger-key">Total Prompt Tokens</span>
+              <span class="ledger-val bold-white" id="turnPromptTotalVal">0</span>
+            </div>
+            <div class="ledger-row indent-row">
+              <span class="ledger-key-sub">Cache Read</span>
+              <span class="ledger-val cache-green" id="turnCacheReadVal">0</span>
+            </div>
+            <div class="ledger-row indent-row">
+              <span class="ledger-key-sub">New Input</span>
+              <span class="ledger-val neutral-val" id="turnNewInputVal">0</span>
+            </div>
           </div>
         </div>
       </section>
 
-      <div class="hairline-divider"></div>
+      <!-- Generation Output Breakdown -->
+      <section class="section-block compactable-section" id="secGenOutput" data-section="genOutput" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
+        <div class="section-header-row">
+          <span class="section-label">Generation Output</span>
+          <span class="ledger-val bold-purple font-mono" id="turnOutputTotalBadge">0</span>
+        </div>
+
+        <div class="section-body">
+          <div class="ledger-list font-mono">
+            <div class="ledger-row indent-row">
+              <span class="ledger-key-sub">Thinking</span>
+              <span class="ledger-val thinking-purple" id="turnThinkingVal">0</span>
+            </div>
+            <div class="ledger-row indent-row">
+              <span class="ledger-key-sub">Response & Tools</span>
+              <span class="ledger-val neutral-val" id="turnResponseVal">0</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <!-- Cumulative Session Statistics -->
-      <section class="section-block">
+      <section class="section-block compactable-section" id="secSessionTotals" data-section="sessionTotals" role="button" tabindex="0" aria-expanded="true" title="Click to compact">
         <div class="section-header-row">
           <span class="section-label">Session Totals</span>
-          <span class="turn-count font-mono" id="totalTurnsBadge">0 Turns</span>
+          <span class="section-summary-right font-mono">
+            <span class="compact-inline-val" id="sessionCompactVal">0</span>
+            <span class="turn-count" id="totalTurnsBadge">0 Turns</span>
+          </span>
         </div>
 
-        <div class="session-metric-row font-mono">
-          <div class="session-total-num" id="sessionProcessedVal">0</div>
-          <div class="session-reuse-rate" id="sessionCacheSavingsVal">0.0% Re-use Rate</div>
-        </div>
+        <div class="section-body">
+          <div class="session-metric-row font-mono">
+            <div class="session-total-num" id="sessionProcessedVal">0</div>
+            <div class="session-reuse-rate" id="sessionCacheSavingsVal">0.0% Re-use Rate</div>
+          </div>
 
-        <div class="session-summary-row font-mono">
-          <span>In: <strong id="sessionInputTotal" class="summary-strong">0</strong></span>
-          <span>Out: <strong id="sessionOutputTotal" class="summary-strong">0</strong></span>
-          <span>Think: <strong id="sessionThinkingTotal" class="summary-strong">0</strong></span>
+          <div class="session-summary-row font-mono">
+            <span>In: <strong id="sessionInputTotal" class="summary-strong">0</strong></span>
+            <span>Out: <strong id="sessionOutputTotal" class="summary-strong">0</strong></span>
+            <span>Think: <strong id="sessionThinkingTotal" class="summary-strong">0</strong></span>
+          </div>
         </div>
       </section>
 
-      <div class="hairline-divider"></div>
-
-      <!-- Log Section (Editorial List) -->
-      <section class="section-block pb-6">
+      <!-- Telemetry Section -->
+      <section class="section-block pb-6" id="secTelemetry" data-section="telemetry">
         <div class="section-header-row">
-          <span class="section-label">Telemetry</span>
-          <div class="view-toggle font-mono">
-            <button class="toggle-btn active" id="viewPromptBtn" data-view="prompt" title="Group telemetry by user prompt">By Prompt</button>
-            <button class="toggle-btn" id="viewStepBtn" data-view="step" title="Detailed per-step LLM calls">By Step</button>
+          <button type="button" class="section-label-btn" id="telemetryHeaderToggle" aria-expanded="true" title="Click to compact Telemetry">
+            <span class="section-label">Telemetry</span>
+            <span class="compact-inline-val font-mono" id="telemetryCompactVal"></span>
+          </button>
+          <div class="telemetry-controls">
+            <div class="view-toggle font-mono">
+              <button class="toggle-btn active" id="viewPromptBtn" data-view="prompt" title="Group telemetry by user prompt">By Prompt</button>
+              <button class="toggle-btn" id="viewStepBtn" data-view="step" title="Detailed per-step LLM calls">By Step</button>
+            </div>
+            <div class="menu-anchor">
+              <button class="icon-btn" id="telemetryMenuBtn" title="Telemetry display fields" aria-haspopup="true" aria-expanded="false">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+                  <circle cx="8" cy="3" r="1.3"/>
+                  <circle cx="8" cy="8" r="1.3"/>
+                  <circle cx="8" cy="13" r="1.3"/>
+                </svg>
+              </button>
+              <div class="popover-menu" id="telemetryMenu" role="menu" aria-label="Telemetry fields">
+                <div class="popover-title">Show Fields</div>
+                <label class="popover-item"><input type="checkbox" data-field-toggle="model" checked><span>Model</span></label>
+                <label class="popover-item"><input type="checkbox" data-field-toggle="chat" checked><span>Chat</span></label>
+                <label class="popover-item"><input type="checkbox" data-field-toggle="calls" checked><span>Call counts</span></label>
+                <label class="popover-item"><input type="checkbox" data-field-toggle="cache" checked><span>Cache</span></label>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="telemetry-list font-mono" id="telemetryList">
-          <div class="empty-state font-mono">Loading telemetry records...</div>
+        <div class="section-body">
+          <div class="telemetry-list font-mono" id="telemetryList">
+            <div class="empty-state font-mono">Loading telemetry records...</div>
+          </div>
         </div>
       </section>
 

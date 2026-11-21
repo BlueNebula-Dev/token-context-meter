@@ -188,7 +188,101 @@ button { font: inherit; color: inherit; cursor: pointer; }
   gap: 14px;
 }
 .section-block { display: flex; flex-direction: column; gap: 8px; }
+.section-block.hidden { display: none; }
+.section-block:not(.hidden) ~ .section-block:not(.hidden) {
+  border-top: 1px solid var(--cx-border);
+  padding-top: 14px;
+}
+.section-body { display: flex; flex-direction: column; gap: 8px; }
 .pb-6 { padding-bottom: 8px; }
+
+/* Click-to-compact for top-level sections */
+.compactable-section {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 140ms var(--ease-out);
+}
+.section-block.compact { gap: 0; }
+.section-block.compact > .section-body { display: none; }
+.section-summary-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.compact-inline-val {
+  display: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cx-fg);
+}
+.section-block.compact .compact-inline-val { display: inline; }
+.section-label-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 6px;
+  text-align: left;
+  transition: background-color 140ms var(--ease-out);
+}
+.telemetry-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Popover menus (⋮) */
+.menu-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.popover-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 156px;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--cx-surface);
+  border: 1px solid var(--cx-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+  z-index: 40;
+  flex-direction: column;
+  gap: 2px;
+}
+.popover-menu.open { display: flex; }
+.popover-title {
+  padding: 3px 8px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cx-fg-muted);
+}
+.popover-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--cx-fg-2);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+.popover-item input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--cx-primary);
+  cursor: pointer;
+}
 
 .hairline-divider {
   height: 1px;
@@ -497,6 +591,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .icon-btn:hover { background: var(--cx-press); color: var(--cx-fg); }
   .toggle-btn:hover:not(.active) { color: var(--cx-fg); }
   .ledger-row:hover, .telemetry-item:hover { background: var(--cx-hover); }
+  .popover-item:hover, .section-label-btn:hover { background: var(--cx-hover); color: var(--cx-fg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
