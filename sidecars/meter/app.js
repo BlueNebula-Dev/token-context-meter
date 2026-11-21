@@ -34,18 +34,24 @@
   let currentTelemetry = null;
   let pollInterval = null;
   let activeView = localStorage.getItem('token_meter_view') || 'prompt';
-  // Telemetry items the user has clicked to compact (persisted across polls/reloads)
-  let compactedKeys = new Set();
+  // Telemetry item compaction: default mode (all compacted vs all expanded) + per-item overrides
+  // When defaultItemsCompact is true, any newly arriving prompts/steps are compacted automatically.
+  let defaultItemsCompact = localStorage.getItem('token_meter_items_default_compact') === 'true';
+  let itemCompactOverrides = new Set();
   try {
-    compactedKeys = new Set(JSON.parse(localStorage.getItem('token_meter_compacted') || '[]'));
+    itemCompactOverrides = new Set(JSON.parse(localStorage.getItem('token_meter_compacted_overrides') || '[]'));
   } catch {}
   function saveCompacted() {
     try {
-      localStorage.setItem('token_meter_compacted', JSON.stringify([...compactedKeys].slice(-200)));
+      localStorage.setItem('token_meter_items_default_compact', String(defaultItemsCompact));
+      localStorage.setItem('token_meter_compacted_overrides', JSON.stringify([...itemCompactOverrides].slice(-200)));
     } catch {}
   }
   function itemKey(kind, num) {
     return `${currentTelemetry?.cascadeId || 'active'}:${kind}:${num}`;
+  }
+  function isItemCompact(key) {
+    return defaultItemsCompact ? !itemCompactOverrides.has(key) : itemCompactOverrides.has(key);
   }
 
   // Persisted UI preferences: visible sections, compacted sections, telemetry fields
@@ -85,6 +91,7 @@
   const telemetryMenuBtn = document.getElementById('telemetryMenuBtn');
   const telemetryMenu = document.getElementById('telemetryMenu');
   const telemetryHeaderToggle = document.getElementById('telemetryHeaderToggle');
+  const compactAllBtn = document.getElementById('compactAllBtn');
 
   const windowUtilCompactVal = document.getElementById('windowUtilCompactVal');
   const activeTurnCompactVal = document.getElementById('activeTurnCompactVal');
@@ -322,6 +329,26 @@
     }
   }
 
+  function formatStepRange(stepIndices) {
+    if (!stepIndices || !stepIndices.length) return { label: '-', title: 'No steps' };
+    if (stepIndices.length === 1) return { label: String(stepIndices[0]), title: `Step ${stepIndices[0]}` };
+    const first = stepIndices[0];
+    const last = stepIndices[stepIndices.length - 1];
+    return {
+      label: `${first}–${last}`,
+      title: `Steps ${stepIndices.join(', ')}`
+    };
+  }
+
+  function renderLedgerRows(rows) {
+    return `<div class="item-ledger">${rows.map(r => `
+      <div class="item-ledger-row">
+        <span class="item-ledger-key"><span class="item-ledger-dot ${r.dot}"></span>${escapeHtml(r.label)}</span>
+        <span class="item-ledger-val ${r.valClass || ''}">${escapeHtml(r.value)}</span>
+      </div>
+    `).join('')}</div>`;
+  }
+
   function renderPromptList(prompts) {
     if (!prompts || prompts.length === 0) {
       telemetryList.innerHTML = `<div class="empty-state font-mono">No prompt records yet</div>`;
@@ -335,7 +362,7 @@
       const previewText = p.userPromptPreview ? truncate(p.userPromptPreview, 26) : '';
       const cacheClass = getCacheBadgeClass(p.cacheEfficiencyPct);
       const key = itemKey('prompt', p.promptNumber);
-      const isCompact = compactedKeys.has(key);
+      const isCompact = isItemCompact(key);
 
       let routingHtml = '';
       if (telemetryFields.model && p.modelsUsedShort && p.modelsUsedShort.length > 0) {
@@ -344,21 +371,36 @@
         ).join('<span class="routing-arrow">→</span>');
       }
 
+      // Dynamic priority for single-line top row: Chat -> Model -> Call counts -> Cache
+      const showChatPrimary = telemetryFields.chat && Boolean(previewText);
+      const promoteModelToTop = !showChatPrimary && Boolean(routingHtml);
+      const hasLeadingItem = showChatPrimary || promoteModelToTop;
+      const callsText = `${p.llmCallsCount} call${p.llmCallsCount === 1 ? '' : 's'}`;
+      const showAnyField = showChatPrimary || Boolean(routingHtml) || telemetryFields.calls || telemetryFields.cache;
+
+      const ledgerHtml = renderLedgerRows([
+        { dot: 'dot-input', label: 'New Input', value: formatNum(p.newInput) },
+        { dot: 'dot-cache', label: 'Cache Read', value: formatNum(p.cacheRead), valClass: 'val-cache' },
+        { dot: 'dot-think', label: 'Thinking', value: formatNum(p.thinking), valClass: 'val-think' },
+        { dot: 'dot-output', label: 'Output', value: formatNum(p.output) },
+        { dot: 'dot-total', label: 'Ending Context', value: `${formatCompactNum(p.endingContext)} (${p.endingContextPct}%)`, valClass: 'val-strong' }
+      ]);
+
       return `
         <div class="telemetry-item${isCompact ? ' compact' : ''}" data-key="${escapeHtml(key)}" role="button" tabindex="0" aria-expanded="${!isCompact}" title="Click to ${isCompact ? 'expand' : 'compact'}">
           <div class="item-top-row">
             <div class="item-title">
               <span class="num-capsule${isLatest ? ' current' : ''}" title="${isLatest ? 'Current prompt' : `Prompt ${p.promptNumber}`}">${p.promptNumber}</span>
-              ${telemetryFields.chat && previewText ? `<span class="prompt-preview" title="${escapeHtml(p.userPromptPreview)}">${escapeHtml(previewText)}</span>` : ''}
-              ${telemetryFields.calls ? `<span class="calls-count">· ${p.llmCallsCount} call${p.llmCallsCount === 1 ? '' : 's'}</span>` : ''}
+              ${showChatPrimary ? `<span class="prompt-preview" title="${escapeHtml(p.userPromptPreview)}">${escapeHtml(previewText)}</span>` : ''}
+              ${promoteModelToTop ? `<span class="item-inline-routing">${routingHtml}</span>` : ''}
+              ${telemetryFields.calls ? `<span class="calls-count">${hasLeadingItem ? '· ' : ''}${callsText}</span>` : ''}
             </div>
-            ${telemetryFields.cache ? `<span class="item-cache-badge ${cacheClass}">${p.cacheEfficiencyPct}% cache</span>` : ''}
+            ${telemetryFields.cache
+              ? `<span class="item-cache-badge ${cacheClass}">${p.cacheEfficiencyPct}% cache</span>`
+              : (!showAnyField ? `<span class="item-context">${p.endingContextPct}% ctx</span>` : '')}
           </div>
-          ${routingHtml ? `<div class="item-routing-row">${routingHtml}</div>` : ''}
-          <div class="item-bottom-row">
-            <span class="item-breakdown">In: ${formatCompactNum(p.newInput)} · Think: ${formatCompactNum(p.thinking)} · Out: ${formatCompactNum(p.output)}</span>
-            <span class="item-context">Ctx: ${p.endingContextPct}%</span>
-          </div>
+          ${!promoteModelToTop && routingHtml ? `<div class="item-routing-row">${routingHtml}</div>` : ''}
+          ${ledgerHtml}
         </div>
       `;
     }).join('');
@@ -371,27 +413,35 @@
     }
 
     telemetryList.innerHTML = turns.map(t => {
-      const stepsStr = t.stepIndices && t.stepIndices.length ? t.stepIndices.join('→') : '-';
+      const stepRange = formatStepRange(t.stepIndices);
       const modelLabel = t.modelShortName || t.modelDisplayName || 'Flash';
       const modelFullName = t.modelDisplayName || t.modelId || 'Unknown Model';
       const cacheClass = getCacheBadgeClass(t.cacheEfficiencyPct);
       const key = itemKey('step', t.turnNumber);
-      const isCompact = compactedKeys.has(key);
+      const isCompact = isItemCompact(key);
+      const showAnyField = telemetryFields.chat || telemetryFields.model || telemetryFields.cache;
+
+      const ledgerHtml = renderLedgerRows([
+        { dot: 'dot-input', label: 'New Input', value: formatNum(t.inputTokens) },
+        { dot: 'dot-cache', label: 'Cache Read', value: formatNum(t.cacheReadTokens), valClass: 'val-cache' },
+        { dot: 'dot-think', label: 'Thinking', value: formatNum(t.thinkingTokens), valClass: 'val-think' },
+        { dot: 'dot-output', label: 'Output', value: formatNum(t.outputTokens) },
+        { dot: 'dot-total', label: 'Total Turn', value: formatNum(t.totalTurnTokens), valClass: 'val-strong' }
+      ]);
 
       return `
         <div class="telemetry-item${isCompact ? ' compact' : ''}" data-key="${escapeHtml(key)}" role="button" tabindex="0" aria-expanded="${!isCompact}" title="Click to ${isCompact ? 'expand' : 'compact'}">
           <div class="item-top-row">
             <div class="item-title">
               <span class="num-capsule" title="Turn ${t.turnNumber}">${t.turnNumber}</span>
-              ${telemetryFields.chat ? `<span class="step-indices">· Step ${escapeHtml(stepsStr)}</span>` : ''}
+              ${telemetryFields.chat ? `<span class="step-indices" title="${escapeHtml(stepRange.title)}">Step ${escapeHtml(stepRange.label)}</span>` : ''}
               ${telemetryFields.model ? `<span class="routing-pill ${getModelPillClass(modelLabel)}" title="${escapeHtml(modelFullName)}">${escapeHtml(modelLabel)}</span>` : ''}
             </div>
-            ${telemetryFields.cache ? `<span class="item-cache-badge ${cacheClass}">${t.cacheEfficiencyPct}% cache</span>` : ''}
+            ${telemetryFields.cache
+              ? `<span class="item-cache-badge ${cacheClass}">${t.cacheEfficiencyPct}% cache</span>`
+              : (!showAnyField ? `<span class="item-context">${formatCompactNum(t.totalTurnTokens)}</span>` : '')}
           </div>
-          <div class="item-bottom-row">
-            <span class="item-breakdown">In: ${formatCompactNum(t.inputTokens)} · Cache: ${formatCompactNum(t.cacheReadTokens)} · Think: ${formatCompactNum(t.thinkingTokens)} · Out: ${formatCompactNum(t.outputTokens)}</span>
-            <span class="item-context">${formatCompactNum(t.totalTurnTokens)} total</span>
-          </div>
+          ${ledgerHtml}
         </div>
       `;
     }).join('');
@@ -497,16 +547,36 @@
     });
   });
 
+  function updateCompactAllBtn() {
+    if (!compactAllBtn) return;
+    compactAllBtn.classList.toggle('active', defaultItemsCompact);
+    compactAllBtn.setAttribute('aria-pressed', String(defaultItemsCompact));
+    compactAllBtn.title = defaultItemsCompact
+      ? 'Expand all telemetry items (new items auto-compact is ON)'
+      : 'Compact all telemetry items (also auto-compacts new items)';
+  }
+
+  if (compactAllBtn) {
+    compactAllBtn.addEventListener('click', () => {
+      defaultItemsCompact = !defaultItemsCompact;
+      itemCompactOverrides.clear();
+      saveCompacted();
+      updateCompactAllBtn();
+      renderTelemetryList();
+    });
+  }
+
+  updateCompactAllBtn();
   applySectionStates();
 
   // Click / keyboard toggle to compact individual telemetry items
   function toggleItem(el) {
     const key = el?.dataset?.key;
     if (!key) return;
-    if (compactedKeys.has(key)) compactedKeys.delete(key);
-    else compactedKeys.add(key);
+    if (itemCompactOverrides.has(key)) itemCompactOverrides.delete(key);
+    else itemCompactOverrides.add(key);
     saveCompacted();
-    const isCompact = compactedKeys.has(key);
+    const isCompact = isItemCompact(key);
     el.classList.toggle('compact', isCompact);
     el.setAttribute('aria-expanded', String(!isCompact));
     el.title = `Click to ${isCompact ? 'expand' : 'compact'}`;

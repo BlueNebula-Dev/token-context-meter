@@ -176,6 +176,12 @@
               <button class="toggle-btn active" id="viewPromptBtn" data-view="prompt" title="Group telemetry by user prompt">By Prompt</button>
               <button class="toggle-btn" id="viewStepBtn" data-view="step" title="Detailed per-step LLM calls">By Step</button>
             </div>
+            <button class="icon-btn" id="compactAllBtn" title="Compact all telemetry items" aria-pressed="false">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 5.5 8 2.5 13 5.5"/>
+                <path d="M3 10.5 8 13.5 13 10.5"/>
+              </svg>
+            </button>
             <div class="menu-anchor">
               <button class="icon-btn" id="telemetryMenuBtn" title="Telemetry display fields" aria-haspopup="true" aria-expanded="false">
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
@@ -185,9 +191,9 @@
                 </svg>
               </button>
               <div class="popover-menu" id="telemetryMenu" role="menu" aria-label="Telemetry fields">
-                <div class="popover-title">Show Fields</div>
-                <label class="popover-item"><input type="checkbox" data-field-toggle="model" checked><span>Model</span></label>
+                <div class="popover-title">Show Fields (Priority)</div>
                 <label class="popover-item"><input type="checkbox" data-field-toggle="chat" checked><span>Chat</span></label>
+                <label class="popover-item"><input type="checkbox" data-field-toggle="model" checked><span>Model</span></label>
                 <label class="popover-item"><input type="checkbox" data-field-toggle="calls" checked><span>Call counts</span></label>
                 <label class="popover-item"><input type="checkbox" data-field-toggle="cache" checked><span>Cache</span></label>
               </div>

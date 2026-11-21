@@ -174,6 +174,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out), transform 120ms var(--ease-out);
 }
 .icon-btn:active { transform: scale(0.95); }
+.icon-btn.active {
+  background: var(--cx-fill);
+  color: var(--cx-primary);
+}
 
 /* ---------- Main ---------- */
 .main-content {
@@ -525,9 +529,61 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .telemetry-item { cursor: pointer; user-select: none; }
 .telemetry-item.compact { gap: 0; padding-top: 6px; padding-bottom: 6px; }
 .telemetry-item.compact .item-routing-row,
+.telemetry-item.compact .item-ledger,
 .telemetry-item.compact .item-bottom-row { display: none; }
 .telemetry-item.compact .item-top-row { font-size: 12px; }
 .telemetry-item.compact .num-capsule { opacity: 0.75; }
+
+/* Inline model pills when promoted into top row */
+.item-inline-routing {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Active-Turn-style ledger inside expanded telemetry items */
+.item-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0 2px 22px;
+}
+.item-ledger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+.item-ledger-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cx-fg-muted);
+}
+.item-ledger-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.item-ledger-dot.dot-input { background: var(--tm-input); }
+.item-ledger-dot.dot-cache { background: var(--tm-cache); }
+.item-ledger-dot.dot-think { background: var(--tm-think); }
+.item-ledger-dot.dot-output { background: var(--tm-output); }
+.item-ledger-dot.dot-total { background: var(--cx-fg-muted); }
+.item-ledger-val {
+  color: var(--cx-fg-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.item-ledger-val.val-cache { color: var(--tm-cache); }
+.item-ledger-val.val-think { color: var(--tm-think); }
+.item-ledger-val.val-strong { color: var(--cx-fg); font-weight: 500; }
 .prompt-preview {
   font-size: 12px;
   color: var(--cx-fg-muted);
