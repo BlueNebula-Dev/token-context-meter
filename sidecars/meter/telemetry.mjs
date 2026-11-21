@@ -10,11 +10,105 @@ import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+function extractToolTargetLabel(name, argsJson) {
+  let args = {};
+  if (typeof argsJson === 'string' && argsJson.trim()) {
+    try { args = JSON.parse(argsJson); } catch {}
+  } else if (argsJson && typeof argsJson === 'object') {
+    args = argsJson;
+  }
+
+  const filePath = args.Path || args.AbsolutePath || args.TargetFile || args.path || args.file;
+  if (typeof filePath === 'string' && filePath.trim()) {
+    const clean = filePath.replace(/\\/g, '/');
+    return basename(clean) || clean;
+  }
+  if (name === 'run_command') {
+    if (typeof args.toolSummary === 'string' && args.toolSummary.trim()) {
+      return args.toolSummary.trim().slice(0, 42);
+    }
+    if (typeof args.CommandLine === 'string' && args.CommandLine.trim()) {
+      return args.CommandLine.trim().replace(/\s+/g, ' ').slice(0, 42);
+    }
+  }
+  if (name === 'call_mcp_tool' && args.ServerName && args.ToolName) {
+    return `${args.ServerName}/${args.ToolName}`;
+  }
+  if (name === 'invoke_subagent') {
+    const t = args.TypeName || 'subagent';
+    return args.Role ? `${t}: ${args.Role}` : t;
+  }
+  if (name === 'ask_question' && Array.isArray(args.questions) && args.questions[0]?.question) {
+    return String(args.questions[0].question).trim().slice(0, 42);
+  }
+  if (typeof args.query === 'string' && args.query.trim()) {
+    return args.query.trim().slice(0, 42);
+  }
+  for (const val of Object.values(args)) {
+    if (typeof val === 'string' && val.trim()) {
+      return val.trim().replace(/\s+/g, ' ').slice(0, 42);
+    }
+  }
+  return '(default)';
+}
+
+function buildToolCallsSummary(entries) {
+  const toolMap = new Map();
+  let totalCalls = 0;
+
+  for (const entry of entries) {
+    totalCalls += 1;
+    let rec = toolMap.get(entry.name);
+    if (!rec) {
+      rec = { name: entry.name, count: 0, targets: new Map() };
+      toolMap.set(entry.name, rec);
+    }
+    rec.count += 1;
+    rec.targets.set(entry.target, (rec.targets.get(entry.target) || 0) + 1);
+  }
+
+  const tools = Array.from(toolMap.values())
+    .map(r => ({
+      name: r.name,
+      count: r.count,
+      targets: Array.from(r.targets.entries())
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  return { totalCalls, tools };
+}
+
+function resolveModelLimitsFor(models, displayName, modelKey, responseModel) {
+  let maxContextTokens = 1048576;
+  let maxOutputTokens = 65536;
+  let resolvedName = displayName || 'Default Model';
+
+  for (const [key, modelDef] of Object.entries(models || {})) {
+    if (modelDef.displayName === displayName ||
+        (modelKey && modelDef.model === modelKey) ||
+        (responseModel && (key === responseModel || key.includes(responseModel)))) {
+      maxContextTokens = modelDef.maxTokens || maxContextTokens;
+      maxOutputTokens = modelDef.maxOutputTokens || maxOutputTokens;
+      resolvedName = modelDef.displayName || resolvedName;
+      break;
+    }
+  }
+  return { maxContextTokens, maxOutputTokens, displayName: resolvedName };
+}
 
 // Cache for model definitions
 let cachedModels = null;
 let modelsCacheExpiry = 0;
+
+// Cache for current logged-in account
+let cachedAccount = null;
+let accountCacheExpiry = 0;
 
 // Cache for language server credentials
 let cachedCredentials = null;
@@ -229,9 +323,9 @@ export function callLanguageServerRpc(method, body = {}) {
 /**
  * Fetches available models and their token limits with caching.
  */
-export async function getModelLimits() {
+export async function getModelLimits(forceRefresh = false) {
   const now = Date.now();
-  if (cachedModels && now < modelsCacheExpiry) {
+  if (!forceRefresh && cachedModels && now < modelsCacheExpiry) {
     return cachedModels;
   }
 
@@ -239,12 +333,125 @@ export async function getModelLimits() {
     const resp = await callLanguageServerRpc('GetAvailableModels', {});
     const models = resp.response?.models || {};
     cachedModels = models;
-    modelsCacheExpiry = now + 60000; // Cache for 60 seconds
+    modelsCacheExpiry = now + 30000; // Cache for 30 seconds
     return models;
   } catch (err) {
     if (cachedModels) return cachedModels;
     return {};
   }
+}
+
+/**
+ * Fetches the currently logged-in Antigravity account from GetUserStatus.
+ */
+export async function getCurrentAccount() {
+  const now = Date.now();
+  if (cachedAccount && now < accountCacheExpiry) {
+    return cachedAccount;
+  }
+
+  try {
+    const resp = await callLanguageServerRpc('GetUserStatus', {});
+    const us = resp.userStatus || {};
+    const email = (us.email || '').trim();
+    const name = (us.name || '').trim();
+    const planName = (us.planStatus?.planInfo?.planName || '').trim();
+    const accountKey = email ? email.toLowerCase() : 'local-default';
+    cachedAccount = {
+      accountKey,
+      email: email || 'Local Account',
+      name: name || email || 'Local User',
+      planName: planName || 'Standard'
+    };
+    accountCacheExpiry = now + 60000;
+    return cachedAccount;
+  } catch {
+    return cachedAccount || {
+      accountKey: 'local-default',
+      email: 'Local Account',
+      name: 'Local User',
+      planName: 'Standard'
+    };
+  }
+}
+
+/**
+ * Groups available models into their live quota pools (5-hour vs Weekly windows)
+ * using quotaInfo.remainingFraction and quotaInfo.resetTime from GetAvailableModels.
+ */
+export async function getQuotaPools(forceRefresh = false) {
+  const models = await getModelLimits(forceRefresh);
+  const nowMs = Date.now();
+  const buckets = new Map();
+
+  for (const [key, def] of Object.entries(models || {})) {
+    const qi = def?.quotaInfo;
+    if (!qi || qi.remainingFraction === undefined || !qi.resetTime) continue;
+    const displayName = (def.displayName || key).trim();
+    const resetMs = Date.parse(qi.resetTime);
+    if (Number.isNaN(resetMs)) continue;
+
+    const hoursUntilReset = (resetMs - nowMs) / 3600000;
+    const windowType = hoursUntilReset > 8 ? 'weekly' : '5h';
+
+    // Determine family key so pools stay stable even when resetTime advances
+    const lower = `${key} ${displayName}`.toLowerCase();
+    let family = 'other';
+    let familyLabel = 'Other Models';
+    if (lower.includes('claude') || lower.includes('gpt')) {
+      family = 'claude-gpt';
+      familyLabel = 'Claude / GPT';
+    } else if (lower.includes('argon')) {
+      family = 'gemini-argon';
+      familyLabel = 'Gemini Argon';
+    } else if (lower.includes('gemini') || lower.includes('neon') || lower.includes('hydrogen') || lower.includes('flash')) {
+      family = 'gemini-flash-neon';
+      familyLabel = 'Gemini Flash / Neon';
+    }
+
+    const poolId = `${windowType}:${family}`;
+    let bucket = buckets.get(poolId);
+    if (!bucket) {
+      bucket = {
+        poolId,
+        label: familyLabel,
+        windowType,
+        remainingFraction: Number(qi.remainingFraction),
+        resetTime: qi.resetTime,
+        resetMs,
+        models: []
+      };
+      buckets.set(poolId, bucket);
+    } else {
+      // Keep the tightest remainingFraction in the bucket
+      bucket.remainingFraction = Math.min(bucket.remainingFraction, Number(qi.remainingFraction));
+    }
+    if (!bucket.models.includes(displayName)) {
+      bucket.models.push(displayName);
+    }
+  }
+
+  return Array.from(buckets.values())
+    .map(b => {
+      const remFrac = Math.min(1, Math.max(0, b.remainingFraction));
+      const remainingPct = parseFloat((remFrac * 100).toFixed(1));
+      const usedPct = parseFloat(((1 - remFrac) * 100).toFixed(1));
+      return {
+        poolId: b.poolId,
+        label: b.label,
+        windowType: b.windowType,
+        remainingFraction: remFrac,
+        remainingPct,
+        usedPct,
+        resetTime: b.resetTime,
+        msUntilReset: Math.max(0, b.resetMs - nowMs),
+        models: b.models
+      };
+    })
+    .sort((a, b) => {
+      if (a.windowType !== b.windowType) return a.windowType === '5h' ? -1 : 1;
+      return b.usedPct - a.usedPct || a.label.localeCompare(b.label);
+    });
 }
 
 /**
@@ -322,6 +529,20 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
   const compactions = [];
   const sessionModelsSet = new Set();
   let prevPromptTokens = 0;
+  let prevTurnCompletedMs = null;
+  let prevTurnModelName = null;
+  let prevTurnModelShort = null;
+
+  function parseStepTimeMs(stepObj, preferEnd = false) {
+    const md = stepObj?.metadata;
+    if (!md) return null;
+    const raw = preferEnd
+      ? (md.completedAt || md.finishedGeneratingAt || md.createdAt)
+      : (md.createdAt || md.startedAt || md.completedAt);
+    if (!raw) return null;
+    const ms = Date.parse(raw);
+    return Number.isNaN(ms) ? null : ms;
+  }
 
   rawTurns.forEach((turn, idx) => {
     const chatModel = turn.chatModel || {};
@@ -341,6 +562,26 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
     const modelKey = usage.model || '';
     const modelId = responseModel || modelKey || modelDisplayName;
     const modelShortName = getCompactModelName(modelDisplayName, responseModel, modelKey);
+    const apiProvider = usage.apiProvider || '';
+
+    const sIndices = turn.stepIndices || [];
+    const firstStepIdx = sIndices.length ? sIndices[0] : -1;
+    const lastStepIdx = sIndices.length ? sIndices[sIndices.length - 1] : -1;
+    const createdAtMs = firstStepIdx >= 0 ? parseStepTimeMs(steps[firstStepIdx], false) : null;
+    const completedAtMs = lastStepIdx >= 0 ? (parseStepTimeMs(steps[lastStepIdx], true) || createdAtMs) : createdAtMs;
+    const gapSincePrevTurnMs = (createdAtMs && prevTurnCompletedMs)
+      ? Math.max(0, createdAtMs - prevTurnCompletedMs)
+      : null;
+
+    const modelSwitched = Boolean(prevTurnModelName && prevTurnModelName !== modelDisplayName);
+    let cacheStatus = 'initial';
+    if (idx > 0) {
+      if (cacheReadTokens > 0) {
+        cacheStatus = modelSwitched ? 'cross_model_hit' : 'warm_hit';
+      } else {
+        cacheStatus = modelSwitched ? 'model_switch_miss' : 'cold_miss';
+      }
+    }
 
     if (modelDisplayName && modelDisplayName !== 'Default Model') {
       sessionModelsSet.add(modelDisplayName);
@@ -350,7 +591,7 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
     if (prevPromptTokens > 8000 && promptTokens < prevPromptTokens * 0.7) {
       compactions.push({
         turnIndex: idx + 1,
-        stepIndices: turn.stepIndices || [],
+        stepIndices: sIndices,
         tokensBefore: prevPromptTokens,
         tokensAfter: promptTokens,
         tokensSaved: prevPromptTokens - promptTokens
@@ -366,10 +607,12 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
 
     const turnItem = {
       turnNumber: idx + 1,
-      stepIndices: turn.stepIndices || [],
+      stepIndices: sIndices,
       modelId,
       modelDisplayName,
       modelShortName,
+      prevModelShortName: prevTurnModelShort,
+      apiProvider,
       responseModel,
       modelKey,
       inputTokens,
@@ -379,12 +622,20 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
       responseTokens,
       promptTokens,
       totalTurnTokens,
-      cacheEfficiencyPct: promptTokens > 0 ? ((cacheReadTokens / promptTokens) * 100).toFixed(1) : '0.0'
+      cacheEfficiencyPct: promptTokens > 0 ? ((cacheReadTokens / promptTokens) * 100).toFixed(1) : '0.0',
+      createdAtMs,
+      completedAtMs,
+      gapSincePrevTurnMs,
+      cacheStatus
     };
     turns.push(turnItem);
 
+    if (completedAtMs) prevTurnCompletedMs = completedAtMs;
+    prevTurnModelName = modelDisplayName;
+    prevTurnModelShort = modelShortName;
+
     // Assign turn to corresponding user prompt group
-    const firstStep = turn.stepIndices && turn.stepIndices.length ? turn.stepIndices[0] : 0;
+    const firstStep = sIndices.length ? sIndices[0] : 0;
     let targetPromptIdx = 0;
     for (let i = 0; i < userPrompts.length; i++) {
       if (firstStep >= userPrompts[i].stepIndex) {
@@ -416,8 +667,67 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
     }
   }
 
-  // 2. Build grouped prompts array for "By Prompt" view
-  const prompts = promptGroups.map((pg) => {
+  // 2. Build grouped prompts array for "By Prompt" view (with chat-to-chat cache lifespan stats)
+  let prevPromptEndedMs = null;
+  let prevPromptLastModelName = null;
+  let prevPromptLastModelShort = null;
+
+  // Burst-resistant survival boundary tracker (only same-model prompt-to-prompt gaps >= 30s)
+  const MIN_NON_BURST_MS = 30 * 1000;
+  function makeLifespanBucket() {
+    return {
+      maxWarmGapMs: null,
+      minColdGapMs: null,
+      warmSamples: 0,
+      coldSamples: 0
+    };
+  }
+  const overallLifespan = makeLifespanBucket();
+  const lifespanByModel = {};
+
+  function recordLifespanSample(bucket, gapMs, isWarm) {
+    if (gapMs == null || gapMs < MIN_NON_BURST_MS) return;
+    if (isWarm) {
+      bucket.warmSamples += 1;
+      if (bucket.maxWarmGapMs === null || gapMs > bucket.maxWarmGapMs) {
+        bucket.maxWarmGapMs = gapMs;
+      }
+    } else {
+      bucket.coldSamples += 1;
+      if (bucket.minColdGapMs === null || gapMs < bucket.minColdGapMs) {
+        bucket.minColdGapMs = gapMs;
+      }
+    }
+  }
+
+  function finalizeLifespan(bucket) {
+    const sampleCount = bucket.warmSamples + bucket.coldSamples;
+    const hasWarm = bucket.maxWarmGapMs !== null;
+    const hasCold = bucket.minColdGapMs !== null;
+    let status = 'no_data';
+    let estimatedTtlMs = null;
+    if (hasWarm && hasCold && bucket.minColdGapMs > bucket.maxWarmGapMs) {
+      status = 'bracketed';
+      estimatedTtlMs = Math.round((bucket.maxWarmGapMs + bucket.minColdGapMs) / 2);
+    } else if (hasWarm) {
+      status = 'lower_bound';
+      estimatedTtlMs = bucket.maxWarmGapMs;
+    } else if (hasCold) {
+      status = 'upper_bound';
+      estimatedTtlMs = bucket.minColdGapMs;
+    }
+    return {
+      status,
+      sampleCount,
+      warmSamples: bucket.warmSamples,
+      coldSamples: bucket.coldSamples,
+      maxWarmGapMs: bucket.maxWarmGapMs,
+      minColdGapMs: bucket.minColdGapMs,
+      estimatedTtlMs
+    };
+  }
+
+  const prompts = promptGroups.map((pg, pgIdx) => {
     const pTurns = pg.turns;
     let sumInput = 0, sumCache = 0, sumThinking = 0, sumOutput = 0;
     const modelsUsedSet = [];
@@ -436,13 +746,48 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
       }
     });
 
-    const lastTurn = pTurns[pTurns.length - 1];
+    const firstTurn = pTurns[0] || null;
+    const lastTurn = pTurns[pTurns.length - 1] || null;
     const endingContext = lastTurn ? lastTurn.totalTurnTokens : (latestTurn ? latestTurn.totalTurnTokens : 0);
     const endingContextPct = maxContextTokens > 0 ? ((endingContext / maxContextTokens) * 100).toFixed(2) : '0.0';
     const totalPromptTokens = sumInput + sumCache;
 
-    const minStep = pTurns.length && pTurns[0].stepIndices?.length ? pTurns[0].stepIndices[0] : pg.userStepIndex;
+    const minStep = pTurns.length && firstTurn.stepIndices?.length ? firstTurn.stepIndices[0] : pg.userStepIndex;
     const maxStep = pTurns.length && lastTurn?.stepIndices?.length ? lastTurn.stepIndices[lastTurn.stepIndices.length - 1] : minStep;
+
+    const startedAtMs = firstTurn?.createdAtMs || parseStepTimeMs(steps[pg.userStepIndex], false);
+    const endedAtMs = lastTurn?.completedAtMs || startedAtMs;
+    const gapSincePrevPromptMs = (pgIdx > 0 && startedAtMs && prevPromptEndedMs)
+      ? Math.max(0, startedAtMs - prevPromptEndedMs)
+      : null;
+
+    const firstModelName = firstTurn?.modelDisplayName || null;
+    const firstModelShort = firstTurn?.modelShortName || null;
+    const promptModelSwitched = Boolean(prevPromptLastModelName && firstModelName && prevPromptLastModelName !== firstModelName);
+    const firstTurnHadCache = Boolean(firstTurn && firstTurn.cacheReadTokens > 0);
+
+    let promptCacheStatus = 'initial';
+    if (pgIdx > 0 && firstTurn) {
+      if (firstTurnHadCache) {
+        promptCacheStatus = promptModelSwitched ? 'cross_model_hit' : 'warm_hit';
+      } else {
+        promptCacheStatus = promptModelSwitched ? 'model_switch_miss' : 'cold_miss';
+      }
+
+      // Record chat-to-chat survival boundary ONLY for same-model gaps >= 30s (ignores short bursts & tool loops)
+      if (!promptModelSwitched && gapSincePrevPromptMs !== null && firstModelName) {
+        recordLifespanSample(overallLifespan, gapSincePrevPromptMs, firstTurnHadCache);
+        if (!lifespanByModel[firstModelName]) lifespanByModel[firstModelName] = makeLifespanBucket();
+        recordLifespanSample(lifespanByModel[firstModelName], gapSincePrevPromptMs, firstTurnHadCache);
+      }
+    }
+
+    const prevShortSnapshot = prevPromptLastModelShort;
+    if (endedAtMs) prevPromptEndedMs = endedAtMs;
+    if (lastTurn?.modelDisplayName) {
+      prevPromptLastModelName = lastTurn.modelDisplayName;
+      prevPromptLastModelShort = lastTurn.modelShortName;
+    }
 
     return {
       promptNumber: pg.promptNumber,
@@ -459,9 +804,29 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
       cacheEfficiencyPct: totalPromptTokens > 0 ? ((sumCache / totalPromptTokens) * 100).toFixed(1) : '0.0',
       endingContext,
       endingContextPct,
-      stepRange: pTurns.length ? `${minStep} → ${maxStep}` : `Step ${pg.userStepIndex}`
+      stepRange: pTurns.length ? `${minStep} → ${maxStep}` : `Step ${pg.userStepIndex}`,
+      startedAtMs,
+      endedAtMs,
+      gapSincePrevPromptMs,
+      promptCacheStatus,
+      cachedModelShort: firstModelShort,
+      prevPromptModelShort: prevShortSnapshot
     };
   });
+
+  const finalizedLifespanByModel = {};
+  for (const [mName, b] of Object.entries(lifespanByModel)) {
+    finalizedLifespanByModel[mName] = finalizeLifespan(b);
+  }
+  const cacheLifespan = {
+    overall: finalizeLifespan(overallLifespan),
+    byModel: finalizedLifespanByModel,
+    lastChatCompletedAtMs: latestTurn?.completedAtMs || null,
+    warmModelDisplayName: latestTurn?.modelDisplayName || activeModelDisplayName,
+    warmModelShortName: latestTurn?.modelShortName || getCompactModelName(activeModelDisplayName),
+    lastTurnHadCache: Boolean(latestTurn && latestTurn.cacheReadTokens > 0),
+    minSampleGapMs: MIN_NON_BURST_MS
+  };
 
   // Active Context calculation
   const activeContextTokens = latestTurn ? latestTurn.totalTurnTokens : 0;
@@ -476,6 +841,146 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
   } else if (contextConsumptionPct >= 50) {
     healthStatus = 'moderate';
   }
+
+  // 3. Map step indices -> modelDisplayName & collect 3-level tool call stats + subagents
+  const stepToModel = new Map();
+  for (const t of turns) {
+    for (const sIdx of (t.stepIndices || [])) {
+      stepToModel.set(sIdx, t.modelDisplayName);
+    }
+  }
+
+  const allToolEntries = [];
+  const toolEntriesByModel = new Map();
+  const discoveredSubagents = [];
+  const seenSubIds = new Set();
+
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    const tcs = s.plannerResponse?.toolCalls || [];
+    if (!Array.isArray(tcs) || !tcs.length) continue;
+    const stepModel = stepToModel.get(i) || activeModelDisplayName;
+
+    for (let tIdx = 0; tIdx < tcs.length; tIdx++) {
+      const tc = tcs[tIdx];
+      const name = tc?.name || 'unknown_tool';
+      const target = extractToolTargetLabel(name, tc?.argumentsJson);
+      const entry = { name, target, stepIndex: i, model: stepModel };
+      allToolEntries.push(entry);
+
+      let mList = toolEntriesByModel.get(stepModel);
+      if (!mList) {
+        mList = [];
+        toolEntriesByModel.set(stepModel, mList);
+      }
+      mList.push(entry);
+
+      if (name === 'invoke_subagent') {
+        let args = {};
+        try { args = JSON.parse(tc.argumentsJson || '{}'); } catch {}
+        let subId = null;
+        for (let look = 1; look <= tcs.length + 2 && i + look < steps.length; look++) {
+          const cand = steps[i + look];
+          const str = JSON.stringify(cand || '');
+          const m = str.match(UUID_RE);
+          if (m && m[0] !== cascadeId) {
+            subId = m[0];
+            break;
+          }
+        }
+        const dedupKey = subId || `step-${i}-${tIdx}`;
+        if (!seenSubIds.has(dedupKey)) {
+          seenSubIds.add(dedupKey);
+          discoveredSubagents.push({
+            conversationId: subId,
+            typeName: args.TypeName || 'subagent',
+            role: args.Role || args.TypeName || 'Subagent',
+            requestedModel: args.Model || 'inherit',
+            stepIndex: i
+          });
+        }
+      }
+    }
+  }
+
+  const toolCallsByModel = {};
+  for (const [mName, entries] of toolEntriesByModel.entries()) {
+    toolCallsByModel[mName] = buildToolCallsSummary(entries);
+  }
+  const toolCalls = {
+    ...buildToolCallsSummary(allToolEntries),
+    byModel: toolCallsByModel
+  };
+
+  // 4. Build per-model stats breakdown for the Per-Model dropdown
+  const modelStats = {};
+  for (const t of turns) {
+    const key = t.modelDisplayName || 'Default Model';
+    let ms = modelStats[key];
+    if (!ms) {
+      const lim = resolveModelLimitsFor(models, key, t.modelKey, t.responseModel);
+      ms = {
+        displayName: key,
+        shortName: t.modelShortName,
+        maxContextTokens: lim.maxContextTokens,
+        maxOutputTokens: lim.maxOutputTokens,
+        turnsCount: 0,
+        inputTokens: 0,
+        cacheReadTokens: 0,
+        outputTokens: 0,
+        thinkingTokens: 0,
+        responseTokens: 0,
+        totalProcessedTokens: 0,
+        cacheEfficiencyPct: '0.0',
+        latestTurn: null
+      };
+      modelStats[key] = ms;
+    }
+    ms.turnsCount += 1;
+    ms.inputTokens += t.inputTokens;
+    ms.cacheReadTokens += t.cacheReadTokens;
+    ms.outputTokens += t.outputTokens;
+    ms.thinkingTokens += t.thinkingTokens;
+    ms.responseTokens += t.responseTokens;
+    ms.totalProcessedTokens += t.inputTokens + t.cacheReadTokens + t.outputTokens;
+    ms.latestTurn = t;
+  }
+  for (const ms of Object.values(modelStats)) {
+    const denom = ms.inputTokens + ms.cacheReadTokens;
+    ms.cacheEfficiencyPct = denom > 0 ? ((ms.cacheReadTokens / denom) * 100).toFixed(1) : '0.0';
+  }
+
+  // 5. Enrich discovered subagents with quick live token stats (non-recursive)
+  const subagents = await Promise.all(discoveredSubagents.map(async (sub) => {
+    if (!sub.conversationId) return { ...sub, activeTokens: 0, totalTurns: 0, totalProcessedTokens: 0, modelDisplayName: sub.requestedModel, status: 'unknown' };
+    try {
+      const subTraj = await callLanguageServerRpc('GetCascadeTrajectory', { cascade_id: sub.conversationId });
+      const subTurns = subTraj.trajectory?.generatorMetadata || [];
+      let totalProc = 0;
+      let latestAct = 0;
+      let latestMod = sub.requestedModel;
+      for (const st of subTurns) {
+        const u = st.chatModel?.usage || {};
+        const inp = parseInt(u.inputTokens || '0', 10);
+        const cac = parseInt(u.cacheReadTokens || '0', 10);
+        const out = parseInt(u.outputTokens || '0', 10);
+        totalProc += inp + cac + out;
+        latestAct = inp + cac + out;
+        if (st.chatModel?.modelDisplayName) latestMod = st.chatModel.modelDisplayName;
+      }
+      const status = subTraj.status || (subTurns.length > 0 ? 'active' : 'starting');
+      return {
+        ...sub,
+        activeTokens: latestAct,
+        totalTurns: subTurns.length,
+        totalProcessedTokens: totalProc,
+        modelDisplayName: latestMod,
+        status
+      };
+    } catch {
+      return { ...sub, activeTokens: 0, totalTurns: 0, totalProcessedTokens: 0, modelDisplayName: sub.requestedModel, status: 'unavailable' };
+    }
+  }));
 
   return {
     cascadeId,
@@ -492,6 +997,10 @@ export async function getConversationTokenTelemetry(requestedCascadeId = null) {
       maxContextTokens,
       maxOutputTokens
     },
+    modelStats,
+    toolCalls,
+    subagents,
+    cacheLifespan,
     liveContext: {
       activeTokens: activeContextTokens,
       maxLimit: maxContextTokens,
